@@ -258,5 +258,5 @@ print(f'Best epoch: {best_epoch:d}, Best Acc: {best_acc*100:.2f}%', file=sys.std
 model.load_state_dict(torch.load('.models/best_model'))
 if args.chars:
     char_model.load_state_dict(torch.load('.models/best_char_model'))
-t_loss, t_acc = evaluate(model, test_iterator, criterion, char_model)
+t_loss, t_acc = evaluate(model, test_iterator, loss_function, char_model)
 print(f'{best_epoch:d}\t{best_loss:.5f}\t{best_acc:.5f}\t{t_loss:.5f}\t{t_acc:.5f}', file=stdout, flush=True)
