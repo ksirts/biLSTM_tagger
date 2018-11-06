@@ -193,7 +193,7 @@ CHAR_HIDDEN_DIM = 100
 EMBEDDING_DIM = WORD_EMBEDDING_DIM + 2 * CHAR_EMBEDDING_DIM
 
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-# print(device)
+print('# device:', device, file=sys.stderr)
 
 train_iterator, valid_iterator, test_iterator = data.BucketIterator.splits(
             (train_data, valid_data, test_data), 
@@ -208,11 +208,14 @@ if args.chars:
 model = LSTMTagger(WORD_EMBEDDING_DIM, EMBEDDING_DIM, HIDDEN_DIM, len(WORD.vocab), len(UD_TAG.vocab))
 
 if args.load:
-    print('# Loading model from file ...', file=sys.stderr)
+    print('# Loading model from file ...', file=sys.stderr, flush=True)
     model.load_state_dict(torch.load('.models/best_model'))
     if args.chars:
-        print('# Loading char embedding model from file ...', file=sys.stderr)
+        print('# Loading char embedding model from file ...', file=sys.stderr, flush=True)
         char_model.load_state_dict(torch.load('.models/best_char_model'))
+else:
+    print('# Creating new model ...', file=sys.stderr, flush=True)
+
 
 loss_function = nn.CrossEntropyLoss(ignore_index=WORD.vocab.stoi['<pad>'])
 
@@ -240,6 +243,7 @@ for epoch in range(N_EPOCHS):
     train_loss, train_acc = train(model, train_iterator, optimizer, loss_function, char_model)
     valid_loss, valid_acc = evaluate(model, valid_iterator, loss_function, char_model)
     if valid_acc > best_acc:
+        print(f'Epoch {epoch+1:01}: saving the best model ...', file=sys.stderr, flush=True)
         best_acc = valid_acc
         best_epoch = epoch
         best_loss = valid_loss
@@ -247,12 +251,12 @@ for epoch in range(N_EPOCHS):
         if args.chars:
             torch.save(char_model.state_dict(), '.models/best_char_model')
     
-    print(f'| Epoch: {epoch+1:02} | Train Loss: {train_loss:.3f} | Train Acc: {train_acc*100:.2f}% | Val. Loss: {valid_loss:.3f} | Val. Acc: {valid_acc*100:.2f}% |')
+    print(f'| Epoch: {epoch+1:02} | Train Loss: {train_loss:.3f} | Train Acc: {train_acc*100:.2f}% | Val. Loss: {valid_loss:.3f} | Val. Acc: {valid_acc*100:.2f}% |', file=sys.stdout, flush=True)
 
-print(f'Best epoch: {best_epoch:d}, Best Acc: {best_acc*100:.2f}%', file=sys.stderr)
+print(f'Best epoch: {best_epoch:d}, Best Acc: {best_acc*100:.2f}%', file=sys.stdout, flush=True)
 
 model.load_state_dict(torch.load('.models/best_model'))
 if args.chars:
     char_model.load_state_dict(torch.load('.models/best_char_model'))
 t_loss, t_acc = evaluate(model, test_iterator, criterion, char_model)
-print(f'{best_epoch:d}\t{best_loss:.5f}\t{best_acc:.5f}\t{t_loss:.5f}\t{t_acc:.5f}')
+print(f'{best_epoch:d}\t{best_loss:.5f}\t{best_acc:.5f}\t{t_loss:.5f}\t{t_acc:.5f}', file=stdout, flush=True)
