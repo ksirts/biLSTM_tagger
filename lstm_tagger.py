@@ -127,8 +127,10 @@ class CharEmbeddings(nn.Module):
         chars = chars.view(-1, chars_size[-1])
         # Move batch to second dimension
         chars = chars.permute(1, 0)
+        # print('# chars is cuda:', chars.is_cuda, file=sys.stderr, flush=True)
         # Embed characters
         embeds = self.char_embeddings(chars)
+        # print('# embeds is cuda:', embeds.is_cuda, file=sys.stderr, flush=True)
         # Send through LSTM
         lstm_out, hidden = self.lstm(embeds)
         # Concatenate states to get word embeddings
@@ -158,7 +160,7 @@ class LSTMTagger(nn.Module):
 
     def forward(self, sentence, char_embeds=None):
         embeds = self.word_embeddings(sentence)
-        if char_embeds:
+        if char_embeds is not None:
             embeds = torch.cat([embeds, char_embeds], dim=2)
         lstm_out, hidden = self.lstm(embeds)
         tag_space = self.hidden2tag(lstm_out)
@@ -173,24 +175,36 @@ if args.chars:
     fields = ((('word', 'char'), (WORD, CHAR)), ('udtag', UD_TAG))
 else:
     fields = (('word', WORD), ('udtag', UD_TAG))
+print('# fields =', fields, file=sys.stderr, flush=True)
 
 train_data, valid_data, test_data = datasets.UDPOS.splits(fields=fields)
 
 
 WORD.build_vocab(train_data)
+print('# Word vocab size:\t', len(WORD.vocab), file=sys.stderr, flush=True)
 UD_TAG.build_vocab(train_data)
+print('# Tag vocab size:\t', len(UD_TAG.vocab), file=sys.stderr, flush=True)
 if args.chars:
     CHAR.build_vocab(train_data)
+    print('# Char vocab size:\t', len(CHAR.vocab), file=sys.stderr, flush=True)
 
 
 BATCH_SIZE = 64
 WORD_EMBEDDING_DIM = 300
 HIDDEN_DIM = 300
 CHAR_EMBEDDING_DIM = 0
+CHAR_HIDDEN_DIM = 0
 if args.chars:
     CHAR_EMBEDDING_DIM = 100
-CHAR_HIDDEN_DIM = 100
+    CHAR_HIDDEN_DIM = 100
 EMBEDDING_DIM = WORD_EMBEDDING_DIM + 2 * CHAR_EMBEDDING_DIM
+
+print('# batch size:\t\t', BATCH_SIZE, file=sys.stderr, flush=True)
+print('# word embedding dim:\t', WORD_EMBEDDING_DIM, file=sys.stderr, flush=True)
+print('# hidden dim:\t\t', HIDDEN_DIM, file=sys.stderr, flush=True)
+print('# char embedding dim:\t', CHAR_EMBEDDING_DIM, file=sys.stderr, flush=True)
+print('# char hidden dim:\t', CHAR_HIDDEN_DIM, file=sys.stderr, flush=True)
+print('# embedding dim:\t', EMBEDDING_DIM, file=sys.stderr, flush=True)
 
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 print('# device:', device, file=sys.stderr)
@@ -205,7 +219,9 @@ train_iterator, valid_iterator, test_iterator = data.BucketIterator.splits(
 char_model = None
 if args.chars:
     char_model = CharEmbeddings(CHAR_EMBEDDING_DIM, CHAR_HIDDEN_DIM, len(CHAR.vocab))
+    print('# Creating char model ...', file=sys.stderr, flush=True)
 model = LSTMTagger(WORD_EMBEDDING_DIM, EMBEDDING_DIM, HIDDEN_DIM, len(WORD.vocab), len(UD_TAG.vocab))
+print('# Creating word model ...', file=sys.stderr, flush=True)
 
 if args.load:
     print('# Loading model from file ...', file=sys.stderr, flush=True)
@@ -214,14 +230,14 @@ if args.load:
         print('# Loading char embedding model from file ...', file=sys.stderr, flush=True)
         char_model.load_state_dict(torch.load('.models/best_char_model'))
 else:
-    print('# Creating new model ...', file=sys.stderr, flush=True)
+    print('# Creating new parameters ...', file=sys.stderr, flush=True)
 
 
 loss_function = nn.CrossEntropyLoss(ignore_index=WORD.vocab.stoi['<pad>'])
 
 params = model.parameters()
 if args.chars:
-    params = list(char_model.paramters()) + list(model.parameters())
+    params = list(char_model.parameters()) + list(model.parameters())
 optimizer = optim.SGD(params, lr=0.1)
 
 model = model.to(device)
@@ -253,10 +269,10 @@ for epoch in range(N_EPOCHS):
     
     print(f'| Epoch: {epoch+1:02} | Train Loss: {train_loss:.3f} | Train Acc: {train_acc*100:.2f}% | Val. Loss: {valid_loss:.3f} | Val. Acc: {valid_acc*100:.2f}% |', file=sys.stdout, flush=True)
 
-print(f'Best epoch: {best_epoch:d}, Best Acc: {best_acc*100:.2f}%', file=sys.stdout, flush=True)
+print(f'Best epoch: {best_epoch+1:02}, Best Acc: {best_acc*100:.2f}%', file=sys.stdout, flush=True)
 
 model.load_state_dict(torch.load('.models/best_model'))
 if args.chars:
     char_model.load_state_dict(torch.load('.models/best_char_model'))
 t_loss, t_acc = evaluate(model, test_iterator, loss_function, char_model)
-print(f'{best_epoch:d}\t{best_loss:.5f}\t{best_acc:.5f}\t{t_loss:.5f}\t{t_acc:.5f}', file=stdout, flush=True)
+print(f'Best epoch: {best_epoch+1:02}, Dev loss: {best_loss:.3f}, Dev acc: {best_acc*100:.2f}%, Test loss: {t_loss:.3f}, Test acc: {t_acc*100:.2f%}', file=sys.stdout, flush=True)
