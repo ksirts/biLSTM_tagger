@@ -22,7 +22,14 @@ parser.add_argument('--load', action='store_true', help='Load existing model fro
 parser.add_argument('--chars', action='store_true', help='Use character level model for embeddings')
 parser.add_argument('--bi-words', action='store_true', help='Use bidirectional word encoder')
 parser.add_argument('--bi-chars', action='store_true', help='Use bidirectional char encoder')
+parser.add_argument('--use-adam', action='store_true', help='Use Adam optimizer')
 args = parser.parse_args()
+
+print('# Load from file:\t', args.load, file=sys.stderr, flush=True)
+print('# Use char model:\t', args.chars, file=sys.stderr, flush=True)
+print('# BiLSTM for words:\t', args.bi_words, file=sys.stderr, flush=True)
+print('# BiLSTM for chars:\t', args.bi_chars, file=sys.stderr, flush=True)
+print('# Use Adam optimizer:\t', args.use_adam, file=sys.stderr, flush=True)
 
 def sequence_accuracy(scores, targets, lengths):
     _, predict = torch.max(scores,1)
@@ -254,7 +261,11 @@ loss_function = nn.CrossEntropyLoss(ignore_index=WORD.vocab.stoi['<pad>'])
 params = model.parameters()
 if args.chars:
     params = list(char_model.parameters()) + list(model.parameters())
-optimizer = optim.SGD(params, lr=0.1)
+
+if args.use_adam:
+    optimizer = optim.Adam(params)
+else:
+    optimizer = optim.SGD(params, lr=0.1)
 
 model = model.to(device)
 if args.chars:
