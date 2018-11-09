@@ -14,12 +14,14 @@ from torchtext import datasets
 SEED = 1234
 
 torch.manual_seed(SEED)
-# torch.cuda.manual_seed(SEED)
-# torch.backends.cudnn.deterministic = True
+torch.cuda.manual_seed(SEED)
+torch.backends.cudnn.deterministic = True
 
 parser = ArgumentParser(description="Sequence tagging model")
 parser.add_argument('--load', action='store_true', help='Load existing model from file')
 parser.add_argument('--chars', action='store_true', help='Use character level model for embeddings')
+parser.add_argument('--bi-words', action='store_true', help='Use bidirectional word encoder')
+parser.add_argument('--bi-chars', action='store_true', help='Use bidirectional char encoder')
 args = parser.parse_args()
 
 def sequence_accuracy(scores, targets, lengths):
@@ -114,12 +116,13 @@ def evaluate(model, iterator, criterion, char_model=None):
 
 class CharEmbeddings(nn.Module):
     
-    def __init__(self, embedding_dim, hidden_dim, vocab_size):
+    def __init__(self, embedding_dim, hidden_dim, vocab_size, bidirectional=False):
         super(CharEmbeddings, self).__init__()
         self.hidden_dim = hidden_dim
+        self.bidirectional=bidirectional
         
         self.char_embeddings = nn.Embedding(vocab_size, embedding_dim)
-        self.lstm = nn.LSTM(embedding_dim, hidden_dim)
+        self.lstm = nn.LSTM(embedding_dim, hidden_dim, bidirectional=bidirectional)
         
     def forward(self, chars):
         chars_size = chars.size()
@@ -127,16 +130,24 @@ class CharEmbeddings(nn.Module):
         chars = chars.view(-1, chars_size[-1])
         # Move batch to second dimension
         chars = chars.permute(1, 0)
-        # print('# chars is cuda:', chars.is_cuda, file=sys.stderr, flush=True)
         # Embed characters
         embeds = self.char_embeddings(chars)
-        # print('# embeds is cuda:', embeds.is_cuda, file=sys.stderr, flush=True)
         # Send through LSTM
         lstm_out, hidden = self.lstm(embeds)
         # Concatenate states to get word embeddings
         word_embeds = torch.cat(hidden, dim=2)
+
+        # Compute the last dim of the output
+        dim = 2 * self.hidden_dim
+        
+        # If the encoder is bidirectional then permute the batch to the beginning
+        # and compute the last dim of the output
+        if self.bidirectional:
+            word_embeds = word_embeds.permute(1, 0, 2)
+            dim = 4 * self.hidden_dim
+        
         # Reshape back to batch x sequence x dimension
-        word_embeds = word_embeds.reshape(chars_size[:2] + (self.hidden_dim * 2,))
+        word_embeds = word_embeds.reshape(chars_size[:2] + (dim,))
         # Permute axes to sequence x batch x dimension
         word_embeds = word_embeds.permute(1, 0, 2)
         return word_embeds
@@ -144,7 +155,7 @@ class CharEmbeddings(nn.Module):
 
 class LSTMTagger(nn.Module):
 
-    def __init__(self, word_embedding_dim, embedding_dim, hidden_dim, vocab_size, tagset_size):
+    def __init__(self, word_embedding_dim, embedding_dim, hidden_dim, vocab_size, tagset_size, bidirectional=False):
         super(LSTMTagger, self).__init__()
         self.hidden_dim = hidden_dim
 
@@ -152,10 +163,13 @@ class LSTMTagger(nn.Module):
 
         # The LSTM takes word embeddings as inputs, and outputs hidden states
         # with dimensionality hidden_dim.
-        self.lstm = nn.LSTM(embedding_dim, hidden_dim)
+        self.lstm = nn.LSTM(embedding_dim, hidden_dim, bidirectional=bidirectional)
 
         # The linear layer that maps from hidden state space to tag space
-        self.hidden2tag = nn.Linear(hidden_dim, tagset_size)
+        linear_in = hidden_dim
+        if bidirectional:
+            linear_in = 2 * hidden_dim
+        self.hidden2tag = nn.Linear(linear_in, tagset_size)
 
 
     def forward(self, sentence, char_embeds=None):
@@ -198,6 +212,8 @@ if args.chars:
     CHAR_EMBEDDING_DIM = 100
     CHAR_HIDDEN_DIM = 100
 EMBEDDING_DIM = WORD_EMBEDDING_DIM + 2 * CHAR_EMBEDDING_DIM
+if args.bi_chars:
+    EMBEDDING_DIM = WORD_EMBEDDING_DIM + 4 * CHAR_EMBEDDING_DIM
 
 print('# batch size:\t\t', BATCH_SIZE, file=sys.stderr, flush=True)
 print('# word embedding dim:\t', WORD_EMBEDDING_DIM, file=sys.stderr, flush=True)
@@ -218,9 +234,9 @@ train_iterator, valid_iterator, test_iterator = data.BucketIterator.splits(
 
 char_model = None
 if args.chars:
-    char_model = CharEmbeddings(CHAR_EMBEDDING_DIM, CHAR_HIDDEN_DIM, len(CHAR.vocab))
+    char_model = CharEmbeddings(CHAR_EMBEDDING_DIM, CHAR_HIDDEN_DIM, len(CHAR.vocab), bidirectional=args.bi_chars)
     print('# Creating char model ...', file=sys.stderr, flush=True)
-model = LSTMTagger(WORD_EMBEDDING_DIM, EMBEDDING_DIM, HIDDEN_DIM, len(WORD.vocab), len(UD_TAG.vocab))
+model = LSTMTagger(WORD_EMBEDDING_DIM, EMBEDDING_DIM, HIDDEN_DIM, len(WORD.vocab), len(UD_TAG.vocab), bidirectional=args.bi_words)
 print('# Creating word model ...', file=sys.stderr, flush=True)
 
 if args.load:
@@ -275,4 +291,4 @@ model.load_state_dict(torch.load('.models/best_model'))
 if args.chars:
     char_model.load_state_dict(torch.load('.models/best_char_model'))
 t_loss, t_acc = evaluate(model, test_iterator, loss_function, char_model)
-print(f'Best epoch: {best_epoch+1:02}, Dev loss: {best_loss:.3f}, Dev acc: {best_acc*100:.2f}%, Test loss: {t_loss:.3f}, Test acc: {t_acc*100:.2f%}', file=sys.stdout, flush=True)
+print(f'Best epoch: {best_epoch+1:02}, Dev loss: {best_loss:.3f}, Dev acc: {best_acc*100:.2f}%, Test loss: {t_loss:.3f}, Test acc: {t_acc*100:.2f}%', file=sys.stdout, flush=True)
