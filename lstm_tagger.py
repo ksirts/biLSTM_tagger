@@ -2,6 +2,8 @@ import sys
 
 from argparse import ArgumentParser
 
+import numpy as np
+
 import torch
 from torchtext import data
 
@@ -23,13 +25,15 @@ parser.add_argument('--chars', action='store_true', help='Use character level mo
 parser.add_argument('--bi-words', action='store_true', help='Use bidirectional word encoder')
 parser.add_argument('--bi-chars', action='store_true', help='Use bidirectional char encoder')
 parser.add_argument('--use-adam', action='store_true', help='Use Adam optimizer')
+parser.add_argument('--pretrained', action='store_true', help='Use pretrained embeddings')
 args = parser.parse_args()
 
-print('# Load from file:\t', args.load, file=sys.stderr, flush=True)
-print('# Use char model:\t', args.chars, file=sys.stderr, flush=True)
-print('# BiLSTM for words:\t', args.bi_words, file=sys.stderr, flush=True)
-print('# BiLSTM for chars:\t', args.bi_chars, file=sys.stderr, flush=True)
-print('# Use Adam optimizer:\t', args.use_adam, file=sys.stderr, flush=True)
+print('# Load from file:\t\t', args.load, file=sys.stderr, flush=True)
+print('# Use char model:\t\t', args.chars, file=sys.stderr, flush=True)
+print('# BiLSTM for words:\t\t', args.bi_words, file=sys.stderr, flush=True)
+print('# BiLSTM for chars:\t\t', args.bi_chars, file=sys.stderr, flush=True)
+print('# Use Adam optimizer:\t\t', args.use_adam, file=sys.stderr, flush=True)
+print('# Use pretrained embeddings:\t', args.pretrained, file=sys.stderr, flush=True)
 
 def sequence_accuracy(scores, targets, lengths):
     _, predict = torch.max(scores,1)
@@ -43,6 +47,16 @@ def sequence_accuracy(scores, targets, lengths):
     acc = masked_correct.sum() / total
     return acc
 
+def oov_accuracy(words, scores, targets):
+    _, predictions = torch.max(scores, 1)
+    data = [[pred, lab] for (word, pred, lab) in zip(words, predictions, targets) 
+                    if WORD.vocab.itos[word] == '<unk>']
+    if len(data) == 0:
+        return None
+    else:
+        data = np.array(data)
+        return np.mean(data[:,0] == data[:,1])
+
 def train(model, iterator, optimizer, criterion, char_model=None):
 
     epoch_loss = 0
@@ -50,7 +64,7 @@ def train(model, iterator, optimizer, criterion, char_model=None):
 
     model.train()
 
-    if char_model:
+    if char_model is not None:
         char_model.train()
   
     for i, batch in enumerate(iterator):
@@ -88,13 +102,15 @@ def train(model, iterator, optimizer, criterion, char_model=None):
 
 def evaluate(model, iterator, criterion, char_model=None):
     
-    epoch_loss = 0
-    epoch_acc = 0
+    epoch_loss = 0.0
+    epoch_acc = 0.0
+    epoch_oov_acc = 0.0
+    oov_batches = 0
     
     model.eval()
     
-    if char_model:
-        char_model.train()
+    if char_model is not None:
+        char_model.eval()
     
     with torch.no_grad():
     
@@ -117,8 +133,14 @@ def evaluate(model, iterator, criterion, char_model=None):
 
             epoch_loss += loss.item()
             epoch_acc += acc.item()
+
+            words = words.reshape(-1)
+            oov_acc = oov_accuracy(words, predictions, labels)
+            if oov_acc:
+                epoch_oov_acc += oov_acc
+                oov_batches += 1
         
-    return epoch_loss / len(iterator), epoch_acc / len(iterator)
+    return epoch_loss / len(iterator), epoch_acc / len(iterator), epoch_oov_acc / oov_batches
 
 
 class CharEmbeddings(nn.Module):
@@ -200,8 +222,10 @@ print('# fields =', fields, file=sys.stderr, flush=True)
 
 train_data, valid_data, test_data = datasets.UDPOS.splits(fields=fields)
 
-
-WORD.build_vocab(train_data)
+vectors=None
+if args.pretrained:
+    vectors='glove.6B.300d'
+WORD.build_vocab(train_data, vectors=vectors)
 print('# Word vocab size:\t', len(WORD.vocab), file=sys.stderr, flush=True)
 UD_TAG.build_vocab(train_data)
 print('# Tag vocab size:\t', len(UD_TAG.vocab), file=sys.stderr, flush=True)
@@ -241,10 +265,11 @@ train_iterator, valid_iterator, test_iterator = data.BucketIterator.splits(
 
 char_model = None
 if args.chars:
-    char_model = CharEmbeddings(CHAR_EMBEDDING_DIM, CHAR_HIDDEN_DIM, len(CHAR.vocab), bidirectional=args.bi_chars)
     print('# Creating char model ...', file=sys.stderr, flush=True)
-model = LSTMTagger(WORD_EMBEDDING_DIM, EMBEDDING_DIM, HIDDEN_DIM, len(WORD.vocab), len(UD_TAG.vocab), bidirectional=args.bi_words)
+    char_model = CharEmbeddings(CHAR_EMBEDDING_DIM, CHAR_HIDDEN_DIM, len(CHAR.vocab), bidirectional=args.bi_chars)
+
 print('# Creating word model ...', file=sys.stderr, flush=True)
+model = LSTMTagger(WORD_EMBEDDING_DIM, EMBEDDING_DIM, HIDDEN_DIM, len(WORD.vocab), len(UD_TAG.vocab), bidirectional=args.bi_words)
 
 if args.load:
     print('# Loading model from file ...', file=sys.stderr, flush=True)
@@ -255,6 +280,11 @@ if args.load:
 else:
     print('# Creating new parameters ...', file=sys.stderr, flush=True)
 
+
+if args.pretrained:
+    print('# Copying pretrained embeddings ...', file=sys.stderr, flush=True)
+    pretrained_embeddings = WORD.vocab.vectors
+    model.word_embeddings.weight.data.copy_(pretrained_embeddings)
 
 loss_function = nn.CrossEntropyLoss(ignore_index=WORD.vocab.stoi['<pad>'])
 
@@ -284,7 +314,7 @@ for epoch in range(N_EPOCHS):
         break
 
     train_loss, train_acc = train(model, train_iterator, optimizer, loss_function, char_model)
-    valid_loss, valid_acc = evaluate(model, valid_iterator, loss_function, char_model)
+    valid_loss, valid_acc, valid_oov_acc = evaluate(model, valid_iterator, loss_function, char_model)
     if valid_acc > best_acc:
         print(f'Epoch {epoch+1:01}: saving the best model ...', file=sys.stderr, flush=True)
         best_acc = valid_acc
@@ -294,12 +324,14 @@ for epoch in range(N_EPOCHS):
         if args.chars:
             torch.save(char_model.state_dict(), '.models/best_char_model')
     
-    print(f'| Epoch: {epoch+1:02} | Train Loss: {train_loss:.3f} | Train Acc: {train_acc*100:.2f}% | Val. Loss: {valid_loss:.3f} | Val. Acc: {valid_acc*100:.2f}% |', file=sys.stdout, flush=True)
+    print(f'| Epoch: {epoch+1:02} | Train Loss: {train_loss:.3f} | Train Acc: {train_acc*100:.2f}% | Valid Loss: {valid_loss:.3f} | Valid Acc: {valid_acc*100:.2f}% | Valid OOV Acc: {valid_oov_acc*100:.2f}%', 
+          file=sys.stdout, flush=True)
 
 print(f'Best epoch: {best_epoch+1:02}, Best Acc: {best_acc*100:.2f}%', file=sys.stdout, flush=True)
 
 model.load_state_dict(torch.load('.models/best_model'))
 if args.chars:
     char_model.load_state_dict(torch.load('.models/best_char_model'))
-t_loss, t_acc = evaluate(model, test_iterator, loss_function, char_model)
-print(f'Best epoch: {best_epoch+1:02}, Dev loss: {best_loss:.3f}, Dev acc: {best_acc*100:.2f}%, Test loss: {t_loss:.3f}, Test acc: {t_acc*100:.2f}%', file=sys.stdout, flush=True)
+t_loss, t_acc, t_oov_acc  = evaluate(model, test_iterator, loss_function, char_model)
+print(f'Best epoch: {best_epoch+1:02}, Dev loss: {best_loss:.3f}, Dev acc: {best_acc*100:.2f}%, Test loss: {t_loss:.3f}, Test acc: {t_acc*100:.2f}%, Test OOV acc: {t_oov_acc*100:.2f}%', 
+      file=sys.stdout, flush=True)
