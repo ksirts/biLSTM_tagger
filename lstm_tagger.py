@@ -14,7 +14,7 @@ import torch.optim as optim
 
 from torchtext import datasets
 
-from torch.nn.utils.rnn import pack_padded_sequence
+from torch.nn.utils.rnn import pack_padded_sequence, pad_packed_sequence
 
 SEED = 1234
 
@@ -95,7 +95,7 @@ def train(model, iterator, optimizer, criterion, char_model=None, oov_embeds=Fal
             words = F.embedding(words, WORD.vocab.vectors)
             words = words.cuda()
 
-        predictions = model(words, char_embeddings)
+        predictions = model(words, lengths, char_embeddings)
         predictions = predictions.reshape(-1, predictions.size()[-1])
         labels = batch.udtag.reshape(-1)
         words = batch.word[0].reshape(-1)
@@ -144,7 +144,7 @@ def evaluate(model, iterator, criterion, char_model=None, oov_embeds=False):
                 words = F.embedding(words, WORD.vocab.vectors)
                 words = words.cuda()
 
-            predictions = model(words, char_embeddings)
+            predictions = model(words, lengths, char_embeddings)
             predictions = predictions.reshape(-1, predictions.size()[-1])
             labels = batch.udtag.reshape(-1)
             words = batch.word[0].reshape(-1)
@@ -244,7 +244,7 @@ class LSTMTagger(nn.Module):
         self.hidden2tag = nn.Linear(linear_in, tagset_size)
 
 
-    def forward(self, words, char_embeds=None):
+    def forward(self, words, lengths, char_embeds=None):
         if hasattr(self, 'word_embeddings'):
             words = self.word_embeddings(words)
 
@@ -253,7 +253,12 @@ class LSTMTagger(nn.Module):
         
         if char_embeds is not None:
             embeds = torch.cat([words, char_embeds], dim=2)
-        lstm_out, _ = self.lstm(embeds)
+
+        lengths = lengths.reshape(-1)
+        embeds_pack = pack_padded_sequence(embeds, lengths, batch_first=True)
+        pack_lstm_out, _ = self.lstm(embeds_pack)
+        lstm_out, _ = pad_packed_sequence(pack_lstm_out, batch_first=True)
+        
         tag_space = self.hidden2tag(lstm_out)
         return tag_space
 
