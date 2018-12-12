@@ -53,12 +53,13 @@ class UDPOSMorph(SequenceTaggingDataset):
     # Universal Dependencies dataset
 
     @classmethod
-    def splits(cls, path=None, root='data', train=None, validation=None, test=None, fields=fields, lang=lang, **kwargs):
+    def splits(cls, path=None, root='data', train=None, validation=None, test=None, **kwargs):
         cls.name = 'ud-treebanks-v2.1'
-        cls.dirname = 'UD_{}'.format(lang_map[lang])
+        cls.dirname = 'UD_{}'.format(lang_map[kwargs['lang']])
        #  print(root, cls.name, cls.dirname)
 
         path = os.path.join(root, cls.name, cls.dirname)
 
-        return super(UDPOSMorph, cls).splits(fields=fields, path=path, root=root, train=train, validation=validation,
+        return super(UDPOSMorph, cls).splits(fields=kwargs['fields'], path=path, root=root, train=train,
+                                             validation=validation,
                                              test=test, **kwargs)
