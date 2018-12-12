@@ -15,13 +15,13 @@ import torch.optim as optim
 from torchtext import datasets
 
 
-from .evaluation import sequence_accuracy
-from .evaluation import oov_accuracy
+from evaluation import sequence_accuracy
+from evaluation import oov_accuracy
 
-from .char_embeddings import CharEmbeddings
-from .lstm_enoder import LSTMTagger
+from char_embeddings import CharEmbeddings
+from lstm_enoder import LSTMTagger
 
-from .ud_data import UDPOSMorph
+from ud_data import UDPOSMorph
 # SEED = 1234
 
 # torch.manual_seed(SEED)
