@@ -14,13 +14,14 @@ import torch.optim as optim
 
 from torchtext import datasets
 
-from torch.nn.utils.rnn import pack_padded_sequence, pad_packed_sequence
 
 from .evaluation import sequence_accuracy
 from .evaluation import oov_accuracy
 
 from .char_embeddings import CharEmbeddings
 from .lstm_enoder import LSTMTagger
+
+from .ud_data import UDPOSMorph
 # SEED = 1234
 
 # torch.manual_seed(SEED)
@@ -37,6 +38,7 @@ def parse_arguments():
     parser.add_argument('--freeze', action='store_true', help='Freeze pretrained embeddings')
     parser.add_argument('--oov-embeddings', action='store_true', help='Load pretrained embeddings for all words')
     parser.add_argument('--input-projection', action='store_true', help='Use input projection in the word model')
+    parser.add_argument('--lang', default='en', help='Language of the dataset')
     args = parser.parse_args()
 
     print('# Load from file:\t\t', args.load, file=sys.stderr)
@@ -45,6 +47,7 @@ def parse_arguments():
     print('# Freeze pretrained embeddings:\t', args.freeze, file=sys.stderr)
     print('# Use embeddings for OOV words:\t', args.oov_embeddings, file=sys.stderr)
     print('# Use input projection:\t\t', args.input_projection, file=sys.stderr)
+    print('# Language:\t\t', args.lang, file=sys.stderr)
 
     return args
 
@@ -72,20 +75,21 @@ def train(model, iterator, optimizer, criterion, char_model=None, oov_embeds=Fal
             chars, _, char_lengths = batch.char
             char_embeddings = char_model(chars, char_lengths)
 
+        word_embeddings = None
         if oov_embeds:
-            words = words.cpu()
-            words = F.embedding(words, WORD.vocab.vectors)
-            words = words.cuda()
+            word_embeddings = F.embedding(words.cpu(), WORD.vocab.vectors)
+            word_embeddings = word_embeddings.cuda()
 
-        predictions = model(words, lengths, char_embeddings)
+        predictions = model(words, lengths, char_embeddings=char_embeddings, word_embeddings=word_embeddings)
         predictions = predictions.reshape(-1, predictions.size()[-1])
         labels = batch.udtag.reshape(-1)
-        words = batch.word[0].reshape(-1)
+        words = words.reshape(-1)
 
         # Compute the loss, gradients, and update the parameters by
         #calling optimizer.step()
         loss = criterion(predictions, labels)
-        acc = sequence_accuracy(words, predictions, labels)
+        acc = sequence_accuracy(words, predictions, labels,
+                                WORD.vocab.stoi['<bos>'], WORD.vocab.stoi['<eos>'], WORD.vocab.stoi['<pad>'])
         
         loss.backward()
         optimizer.step()
@@ -121,24 +125,25 @@ def evaluate(model, iterator, criterion, char_model=None, oov_embeds=False):
                 chars, _, char_lengths = batch.char
                 char_embeddings = char_model(chars, char_lengths)
 
+            word_embeddings=None
             if oov_embeds:
-                words = words.cpu()
-                words = F.embedding(words, WORD.vocab.vectors)
-                words = words.cuda()
+                word_embeddings = F.embedding(words.cpu(), WORD.vocab.vectors)
+                word_embeddings = word_embeddings.cuda()
 
-            predictions = model(words, lengths, char_embeddings)
+            predictions = model(words, lengths, char_embeddings=char_embeddings, word_embeddings=word_embeddings)
             predictions = predictions.reshape(-1, predictions.size()[-1])
             labels = batch.udtag.reshape(-1)
             words = batch.word[0].reshape(-1)
             
             loss = criterion(predictions, labels)
-            acc = sequence_accuracy(words, predictions, labels)
+            acc = sequence_accuracy(words, predictions, labels,
+                                    WORD.vocab.stoi['<bos>'], WORD.vocab.stoi['<eos>'], WORD.vocab.stoi['<pad>'])
 
             epoch_loss += loss.item()
             epoch_acc += acc.item()
 
             words = batch.word[0].reshape(-1)
-            oov_acc = oov_accuracy(words, predictions, labels)
+            oov_acc = oov_accuracy(words, predictions, labels, WORD.vocab.stoi['<unk>'])
             if oov_acc:
                 epoch_oov_acc += oov_acc
                 oov_batches += 1
@@ -193,19 +198,22 @@ if __name__ == '__main__':
 
     # Word and char model
     if args.chars:
-        fields = ((('word', 'char'), (WORD, CHAR)), ('udtag', UD_TAG))
+        fields = ((None, None), (('word', 'char'), (WORD, CHAR)), (None, None), ('udtag', UD_TAG))
 
     # Word only model
     else:
-        fields = (('word', WORD), ('udtag', UD_TAG))
+        fields = ((None, None), ('word', WORD), (None, None), ('udtag', UD_TAG))
     print('# fields =', fields, file=sys.stderr)
 
-    train_data, valid_data, test_data = datasets.UDPOS.splits(fields=fields)
+    train_data, valid_data, test_data = UDPOSMorph.splits(root='data', fields=fields,
+                                                          train='{}-ud-train.conllu'.format(args.lang),
+                                                          validation='{}-ud-dev.conllu'.format(args.lang),
+                                                          test='{}-ud-test.conllu'.format(args.lang))
 
     WORD.build_vocab(train_data)
 
     if args.pretrained:
-        vectors=vocab.GloVe(name="6B", dim=300)
+        vectors=vocab.FastText(language=args.lang)
 
         if args.oov_embeddings:
             WORD.vocab.extend(vectors)

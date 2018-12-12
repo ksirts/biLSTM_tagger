@@ -11,6 +11,7 @@ class CharEmbeddings(nn.Module):
         self.hidden_dim = hidden_dim
 
         self.char_embeddings = nn.Embedding(vocab_size, embedding_dim)
+        self.dropout = nn.Dropout(p=0.5)
         self.lstm = nn.LSTM(embedding_dim, hidden_dim, batch_first=True, bidirectional=True)
 
     def forward(self, chars, lengths):
@@ -19,6 +20,7 @@ class CharEmbeddings(nn.Module):
         chars = chars.reshape(-1, chars_size[-1])
         # Embed characters
         embeds = self.char_embeddings(chars)
+        embeds = self.dropout(embeds)
 
         # Sort and pack the embeddings
         lengths = lengths.reshape(-1)

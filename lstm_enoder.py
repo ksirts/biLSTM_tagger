@@ -10,64 +10,91 @@ from torch.nn.utils.rnn import pack_padded_sequence, pad_packed_sequence
 class LSTMTagger(nn.Module):
 
     def __init__(self, hidden_dim, tagset_size, embedding_dim, word_embedding_dim=0, vocab_size=0,
-                 freeze=False, input_projection=False):
+                 freeze=False, input_projection=False, special_symbols=None,
+                 bos_index=None, eos_index=None, unk_index=None, pad_index=None):
         super(LSTMTagger, self).__init__()
         self.hidden_dim = hidden_dim
 
         if word_embedding_dim > 0 and vocab_size > 0:
             print('# Creating word embedding layer ...', file=sys.stderr)
             self.word_embeddings = nn.Embedding(vocab_size, word_embedding_dim)
+            self.embeds_dropout = nn.Dropout(p=0.5)
             if freeze:
                 print('# Freezing word embedding layer ...', file=sys.stderr)
                 self.word_embeddings.weight.requires_grad = False
 
         if input_projection:
             assert word_embedding_dim > 0
-            print('# Creating input projection layer ...', file=sys.stderr, flush=True)
+            print('# Creating input projection layer ...', file=sys.stderr)
             self.embed2input = nn.Linear(word_embedding_dim, word_embedding_dim)
+            self.input_dropout = nn.Dropout(p=0.5)
+
+        if special_symbols is not None:
+            assert type(special_symbols) == 'list'
+            self.special_embeddings = nn.Embedding(len(special_symbols) + 1, word_embedding_dim,
+                                                    padding_idx=len(special_symbols))
+            self.special_pad = len(special_symbols)
+            self.special_symbols = special_symbols
 
         # The LSTM takes word embeddings as inputs, and outputs hidden states
         # with dimensionality hidden_dim.
         self.lstm = nn.LSTM(embedding_dim, hidden_dim, batch_first=True, bidirectional=True)
+        self.output_dropout = nn.Dropout(p=0.5)
 
         # The linear layer that maps from hidden state space to tag space
         linear_in = 2 * hidden_dim
         self.hidden2tag = nn.Linear(linear_in, tagset_size)
 
-    def forward(self, lengths, words=None, char_embeds=None):
+    def forward(self, lengths, words=None, char_embeddings=None, word_embeddings=None):
 
         # Char only model
-        if words is None and char_embeds is not None:
-            embeds = char_embeds
+        if char_embeddings is not None and words is None and word_embeddings is None:
+            embeds = char_embeddings
+            embeds = self.embeds_dropout(embeds)
 
-        # Word only model
-        elif words is not None and char_embeds is None:
+        # Fine-tuned word model with or without char embeddings
+        elif words is not None and word_embeddings is None:
+            assert hasattr(self, 'word_embeddings')
+            word_embeds = self.word_embeddings(words)
+            word_embeds = self.embeds_dropout(word_embeds)
+            if hasattr(self, 'embed2input'):
+                word_embeds = self.embed2input(word_embeds)
+                word_embeds = self.input_dropout(word_embeds)
 
-            if hasattr(self, 'word_embeddings'):
-                words = self.word_embeddings(words)
+            if char_embeddings is not None:
+                char_embeds = self.embeds_dropout(char_embeddings)
+                embeds = torch.cat([word_embeds, char_embeds], dim=2)
+            else:
+                embeds = word_embeds
+
+        # Model with given word embeddings with or without char embeddings
+        elif word_embeddings is not None and words is None:
+            word_embeds = word_embeddings
+            if hasattr(self, 'special_embeddings'):
+                mask = words == self.special_symbols[0]
+                for i in range(1, len(self.special_symbols)):
+                    mask |= words == self.special_symbols[i]
+                mask = ~mask
+                words[mask] = self.special_pad
+
+                special_embeds = self.special_embeddings(words)
+                word_embeds += special_embeds
 
             if hasattr(self, 'embed2input'):
-                words = self.embed2input(words)
-            embeds = words
+                word_embeds = self.embed2input(word_embeds)
+                word_embeds = self.input_dropout(word_embeds)
 
-        # Word and char model
-        else:
-            assert words is not None
-            assert char_embeds is not None
+            if char_embeddings is not None:
+                char_embeds = self.embeds_dropout(char_embeddings)
+                embeds = torch.cat([word_embeds, char_embeds], dim=2)
+            else:
+                embeds = word_embeds
 
-            if hasattr(self, 'word_embeddings'):
-                words = self.word_embeddings(words)
+            lengths = lengths.reshape(-1)
+            embeds_pack = pack_padded_sequence(embeds, lengths, batch_first=True)
+            pack_lstm_out, _ = self.lstm(embeds_pack)
+            lstm_out, _ = pad_packed_sequence(pack_lstm_out, batch_first=True)
+            lstm_out = self.output_dropout(lstm_out)
 
-            if hasattr(self, 'embed2input'):
-                words = self.embed2input(words)
-
-            embeds = torch.cat([words, char_embeds], dim=2)
-
-
-        lengths = lengths.reshape(-1)
-        embeds_pack = pack_padded_sequence(embeds, lengths, batch_first=True)
-        pack_lstm_out, _ = self.lstm(embeds_pack)
-        lstm_out, _ = pad_packed_sequence(pack_lstm_out, batch_first=True)
-
-        tag_space = self.hidden2tag(lstm_out)
-        return tag_space
+            tag_space = self.hidden2tag(lstm_out)
+            return tag_space
