@@ -2,7 +2,9 @@ import os
 
 from torchtext import data
 
-lang_map = {'en': 'English'}
+lang_map = {'en': 'English',
+            'et': 'Estonian'}
+
 
 class SequenceTaggingDataset(data.Dataset):
     """Defines a dataset for sequence tagging. Examples in this dataset
@@ -21,10 +23,10 @@ class SequenceTaggingDataset(data.Dataset):
                 return len(getattr(example, attr))
         return 0
 
-    def __init__(self, path, fields, separator="\t", **kwargs):
+    def __init__(self, path, fields, logger, separator='\t'):
         examples = []
         columns = []
-        print('path:', path)
+        logger.info('input path: {}'.format(path))
         with open(path) as input_file:
             for line in input_file:
                 line = line.strip()
@@ -44,8 +46,7 @@ class SequenceTaggingDataset(data.Dataset):
 
             if columns:
                 examples.append(data.Example.fromlist(columns, fields))
-        super(SequenceTaggingDataset, self).__init__(examples, fields,
-                                                     **kwargs)
+        super(SequenceTaggingDataset, self).__init__(examples, fields)
 
 
 class UDPOSMorph(SequenceTaggingDataset):
@@ -53,13 +54,14 @@ class UDPOSMorph(SequenceTaggingDataset):
     # Universal Dependencies dataset
 
     @classmethod
-    def splits(cls, path=None, root='data', train=None, validation=None, test=None, **kwargs):
+    def splits(cls, path=None, root='.data', train=None, validation=None, test=None, **kwargs):
         cls.name = 'ud-treebanks-v2.1'
         cls.dirname = 'UD_{}'.format(lang_map[kwargs['lang']])
        #  print(root, cls.name, cls.dirname)
 
         path = os.path.join(root, cls.name, cls.dirname)
 
-        return super(UDPOSMorph, cls).splits(fields=kwargs['fields'], path=path, root=root, train=train,
+        return super(UDPOSMorph, cls).splits(path=path, root=root, train=train,
                                              validation=validation,
-                                             test=test, **kwargs)
+                                             test=test,
+                                             fields=kwargs['fields'], logger=kwargs['logger'])
