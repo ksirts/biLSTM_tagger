@@ -1,5 +1,6 @@
 import logging
 import sys
+import os.path
 
 def get_logger(fn, level='info'):
     '''
@@ -11,6 +12,10 @@ def get_logger(fn, level='info'):
     logger = logging.getLogger(__name__)
     level = {'info': logging.INFO, 'debug': logging.DEBUG}[level]
     logger.setLevel(level)
+
+    fn = '.models/' + fn
+    if os.path.exists(fn):
+        os.remove(fn)
 
     # Create handlers
     c_handler = logging.StreamHandler(sys.stdout)
