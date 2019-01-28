@@ -7,6 +7,38 @@ import torch
 from torch.nn.utils.rnn import pack_padded_sequence, pad_packed_sequence
 
 
+class CharacterEncoder(nn.Module):
+    ''' The model with only character-based embeddings.
+    Word embeddings are constructed by CharEmbeddings object and passed
+    to the forward method.
+    '''
+
+    def __init__(self, hidden_dim, tagset_size, embedding_dim):
+        super(CharacterEncoder, self).__init__()
+        self.hidden_dim = hidden_dim
+
+        # The LSTM takes word embeddings as inputs, and outputs hidden states
+        # with dimensionality hidden_dim.
+        self.lstm = nn.LSTM(embedding_dim, hidden_dim, batch_first=True, bidirectional=True)
+        self.dropout = nn.Dropout(p=0.5)
+
+        # The linear layer that maps from hidden state space to tag space
+        linear_in = 2 * hidden_dim
+        self.hidden2tag = nn.Linear(linear_in, tagset_size)
+
+    def forward(self, lengths, char_embeddings):
+
+        embeds = self.dropout(char_embeddings)
+
+        lengths = lengths.reshape(-1)
+        embeds_pack = pack_padded_sequence(embeds, lengths, batch_first=True)
+        pack_lstm_out, _ = self.lstm(embeds_pack)
+        lstm_out, _ = pad_packed_sequence(pack_lstm_out, batch_first=True)
+        lstm_out = self.dropout(lstm_out)
+
+        tag_space = self.hidden2tag(lstm_out)
+        return tag_space
+
 class LSTMTagger(nn.Module):
 
     def __init__(self, hidden_dim, tagset_size, embedding_dim, word_embedding_dim=0, vocab_size=0,
@@ -90,11 +122,11 @@ class LSTMTagger(nn.Module):
             else:
                 embeds = word_embeds
 
-            lengths = lengths.reshape(-1)
-            embeds_pack = pack_padded_sequence(embeds, lengths, batch_first=True)
-            pack_lstm_out, _ = self.lstm(embeds_pack)
-            lstm_out, _ = pad_packed_sequence(pack_lstm_out, batch_first=True)
-            lstm_out = self.output_dropout(lstm_out)
+        lengths = lengths.reshape(-1)
+        embeds_pack = pack_padded_sequence(embeds, lengths, batch_first=True)
+        pack_lstm_out, _ = self.lstm(embeds_pack)
+        lstm_out, _ = pad_packed_sequence(pack_lstm_out, batch_first=True)
+        lstm_out = self.output_dropout(lstm_out)
 
-            tag_space = self.hidden2tag(lstm_out)
-            return tag_space
+        tag_space = self.hidden2tag(lstm_out)
+        return tag_space
