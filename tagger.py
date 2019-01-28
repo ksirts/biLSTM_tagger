@@ -52,7 +52,7 @@ def parse_arguments():
     return args
 
 
-def train(model, iterator, optimizer, criterion, char_model=None, oov_embeds=False):
+def train(model, iterator, optimizer, criterion, char_model=None, oov_embeds=False, char_only=False):
 
     epoch_loss = 0
     epoch_acc = 0
@@ -69,8 +69,11 @@ def train(model, iterator, optimizer, criterion, char_model=None, oov_embeds=Fal
         # Run forward pass.
         
         words, lengths = batch.word
+        if char_only:
+            words = None
         char_embeddings = None
         
+        print(batch)
         if char_model:
             chars, _, char_lengths = batch.char
             char_embeddings = char_model(chars, char_lengths)
@@ -102,7 +105,7 @@ def train(model, iterator, optimizer, criterion, char_model=None, oov_embeds=Fal
         
     return epoch_loss / len(iterator), epoch_acc / len(iterator)
 
-def evaluate(model, iterator, criterion, char_model=None, oov_embeds=False):
+def evaluate(model, iterator, criterion, char_model=None, oov_embeds=False, char_only=False):
     
     epoch_loss = 0.0
     epoch_acc = 0.0
@@ -119,6 +122,8 @@ def evaluate(model, iterator, criterion, char_model=None, oov_embeds=False):
         for i, batch in enumerate(iterator):
             
             words, lengths = batch.word
+            if char_only:
+                words = None
             char_embeddings = None
         
             if char_model:
@@ -163,7 +168,7 @@ if __name__ == '__main__':
     CHAR_HIDDEN_DIM = 0
 
     # Char only model
-    if args.char_only:
+    if args.chars_only:
         CHAR_EMBEDDING_DIM = 100
         CHAR_HIDDEN_DIM = 100
 
@@ -197,7 +202,7 @@ if __name__ == '__main__':
 
 
     # Word and char model
-    if args.chars:
+    if args.chars or args.chars_only:
         fields = ((None, None), (('word', 'char'), (WORD, CHAR)), (None, None), ('udtag', UD_TAG))
 
     # Word only model
@@ -205,7 +210,7 @@ if __name__ == '__main__':
         fields = ((None, None), ('word', WORD), (None, None), ('udtag', UD_TAG))
     print('# fields =', fields, file=sys.stderr)
 
-    train_data, valid_data, test_data = UDPOSMorph.splits(root='data', fields=fields,
+    train_data, valid_data, test_data = UDPOSMorph.splits(root='data', fields=fields, lang=args.lang,
                                                           train='{}-ud-train.conllu'.format(args.lang),
                                                           validation='{}-ud-dev.conllu'.format(args.lang),
                                                           test='{}-ud-test.conllu'.format(args.lang))
@@ -237,7 +242,7 @@ if __name__ == '__main__':
 
     ## Creating models
     # Char only model
-    if args.char_only:
+    if args.chars_only:
         print('# Creating char model ...', file=sys.stderr)
         char_model = CharEmbeddings(CHAR_EMBEDDING_DIM, CHAR_HIDDEN_DIM, len(CHAR.vocab))
         print('# Creating encoder ...', file=sys.stderr)
@@ -313,8 +318,8 @@ if __name__ == '__main__':
         if epoch - best_epoch > LIMIT:
             break
 
-        train_loss, train_acc = train(model, train_iterator, optimizer, loss_function, char_model, args.oov_embeddings)
-        valid_loss, valid_acc, valid_oov_acc = evaluate(model, valid_iterator, loss_function, char_model, args.oov_embeddings)
+        train_loss, train_acc = train(model, train_iterator, optimizer, loss_function, char_model, args.oov_embeddings, args.chars_only)
+        valid_loss, valid_acc, valid_oov_acc = evaluate(model, valid_iterator, loss_function, char_model, args.oov_embeddings, args.chars_only)
         if valid_acc > best_acc:
             print(f'Epoch {epoch+1:01}: saving the best model ...', file=sys.stderr)
             best_acc = valid_acc
@@ -332,6 +337,6 @@ if __name__ == '__main__':
     model.load_state_dict(torch.load('.models/best_model'))
     if args.chars:
         char_model.load_state_dict(torch.load('.models/best_char_model'))
-    t_loss, t_acc, t_oov_acc  = evaluate(model, test_iterator, loss_function, char_model, args.oov_embeddings)
+    t_loss, t_acc, t_oov_acc  = evaluate(model, test_iterator, loss_function, char_model, args.oov_embeddings, args.chars_only)
     print(f'Best epoch: {best_epoch+1:02}, Dev loss: {best_loss:.3f}, Dev acc: {best_acc*100:.2f}%, Test loss: {t_loss:.3f}, Test acc: {t_acc*100:.2f}%, Test OOV acc: {t_oov_acc*100:.2f}%',
           file=sys.stdout)
