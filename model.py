@@ -26,7 +26,7 @@ class Model(object):
         self.char_encoder = CharEmbeddings(embedding_dim=char_emb, hidden_dim=char_hidden,
                                         vocab_size=char_vocab)
         self.logger.info('# Creating encoder ...')
-        embedding_dim = 4 * char_emb
+        embedding_dim = 4 * char_hidden
         self.model = CharacterEncoder(hidden_dim=hidden_dim, tagset_size=output_dim,
                                      embedding_dim=embedding_dim)
 

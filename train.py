@@ -41,7 +41,7 @@ def parse_arguments():
     parser.add_argument('--word-dim', default=300, type=int, help='Word embedding dimension')
     parser.add_argument('--hidden-dim', default=300, type=int, help='Encoder hidden dimension')
     parser.add_argument('--char-emb', default=75, type=int, help='Char embedding dimension')
-    parser.add_argument('--char-hidden', default=100, type=int, help='Char encoder hidden dimension')
+    parser.add_argument('--char-hidden', default=75, type=int, help='Char encoder hidden dimension')
     parser.add_argument('--test', action='store_true', help='Evaluate the model on the test set after training')
     parser.add_argument('--index', type=int, help='If given then indexes the runs of the same model')
     args = parser.parse_args()
@@ -62,7 +62,7 @@ class Trainer(object):
         self.params['hidden_dim'] = args.hidden_dim
         self.model_fn = args.model_name
         if args.index is not None:
-            self.model_fn += str(args.index)
+            self.model_fn += '-' + str(args.index)
 
         self.train_iterator = None
         self.dev_iterator = None
@@ -115,7 +115,7 @@ class Trainer(object):
             batch_size=self.params['batch_size'],
             sort_within_batch=True,
             repeat=False,
-            device=-1)
+            device=device)
         self.train_iterator = train_iterator
         self.dev_iterator = dev_iterator
         self.test_iterator = test_iterator
@@ -175,7 +175,7 @@ class Trainer(object):
                 best_epoch = epoch
                 self.model.save(self.model_fn)
 
-        self.logger(f'Best epoch: {best_epoch+1:02}, Best Acc: {best_acc*100:.2f}%')
+        self.logger.info(f'Best epoch: {best_epoch+1:02}, Best Acc: {best_acc*100:.2f}%')
 
     def _train_epoch(self):
     # def train(model, iterator, optimizer, criterion, char_model=None, oov_embeds=False):
@@ -284,7 +284,11 @@ def main():
 
     args = parse_arguments()
     args.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-    logger = utils.get_logger(args.model_name + '.log', level=args.log_level)
+    
+    model_name = args.model_name
+    if args.index is not None:
+        model_name += '-' + str(args.index)
+    logger = utils.get_logger(model_name + '.log', level=args.log_level)
     for key, val in vars(args).items():
         logger.info('## {}: {}'.format(key, val))
 
