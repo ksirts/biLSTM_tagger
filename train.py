@@ -274,7 +274,7 @@ class Trainer(object):
         return np.mean(data[:, 0] == data[:, 1])
 
     def test(self):
-        self.model.load(self.model_fn)
+        self.model.load('.models/' + self.model_fn)
         t_loss, t_acc, t_oov_acc = self.evaluate(test=True)
         self.logger.info(f'Test loss: {t_loss:.3f}, Test acc: {t_acc*100:.2f}%, Test OOV acc: {t_oov_acc*100:.2f}%')
 
