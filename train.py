@@ -43,6 +43,7 @@ def parse_arguments():
     parser.add_argument('--char-emb', default=75, type=int, help='Char embedding dimension')
     parser.add_argument('--char-hidden', default=100, type=int, help='Char encoder hidden dimension')
     parser.add_argument('--test', action='store_true', help='Evaluate the model on the test set after training')
+    parser.add_argument('--index', type=int, help='If given then indexes the runs of the same model')
     args = parser.parse_args()
 
     return args
@@ -60,6 +61,8 @@ class Trainer(object):
         self.params['char_hidden'] = args.char_hidden
         self.params['hidden_dim'] = args.hidden_dim
         self.model_fn = args.model_name
+        if args.index is not None:
+            self.model_fn += str(args.index)
 
         self.train_iterator = None
         self.dev_iterator = None
