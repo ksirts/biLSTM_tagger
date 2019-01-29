@@ -156,6 +156,7 @@ class Trainer(object):
 
         best_epoch = 0
         best_acc = 0
+        best_oov_acc = 0
 
         self.logger.info('# Start training ...')
         for epoch in range(max_epoch):
@@ -173,9 +174,10 @@ class Trainer(object):
                 self.logger.info(f'Epoch {epoch+1:01}: saving the best model ...')
                 best_acc = valid_acc
                 best_epoch = epoch
+                best_oov_acc = valid_oov_acc
                 self.model.save(self.model_fn)
 
-        self.logger.info(f'Best epoch: {best_epoch+1:02}, Best Acc: {best_acc*100:.2f}%')
+        self.logger.info(f'Best epoch: {best_epoch+1:02}, Best Acc: {best_acc*100:.3f}%, Best OOV Acc: {best_oov_acc*100:.3f}%')
 
     def _train_epoch(self):
     # def train(model, iterator, optimizer, criterion, char_model=None, oov_embeds=False):
@@ -276,7 +278,7 @@ class Trainer(object):
     def test(self):
         self.model.load('.models/' + self.model_fn)
         t_loss, t_acc, t_oov_acc = self.evaluate(test=True)
-        self.logger.info(f'Test loss: {t_loss:.3f}, Test acc: {t_acc*100:.2f}%, Test OOV acc: {t_oov_acc*100:.2f}%')
+        self.logger.info(f'Test loss: {t_loss:.3f}, Test acc: {t_acc*100:.3f}%, Test OOV acc: {t_oov_acc*100:.3f}%')
 
 
 
