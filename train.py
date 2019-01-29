@@ -40,7 +40,7 @@ def parse_arguments():
     parser.add_argument('--batch-size', default=64, type=int, help='Batch size')
     parser.add_argument('--word-dim', default=300, type=int, help='Word embedding dimension')
     parser.add_argument('--hidden-dim', default=300, type=int, help='Encoder hidden dimension')
-    parser.add_argument('--char-emb', default=100, type=int, help='Char embedding dimension')
+    parser.add_argument('--char-emb', default=75, type=int, help='Char embedding dimension')
     parser.add_argument('--char-hidden', default=100, type=int, help='Char encoder hidden dimension')
     parser.add_argument('--test', action='store_true', help='Evaluate the model on the test set after training')
     args = parser.parse_args()
