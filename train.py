@@ -89,6 +89,11 @@ class Trainer(object):
                                                               test='{}-ud-test.conllu'.format(lang),
                                                               lang=lang,
                                                               logger=self.logger)
+        
+        self.logger.info('# Train data size: {}'.format(len(train_data)))
+        self.logger.info('# Dev data size: {}'.format(len(valid_data)))
+        self.logger.info('# Test data size: {}'.format(len(test_data)))
+        
         # Create vocabularies
         WORD.build_vocab(train_data)
         UD_TAG.build_vocab(train_data)
@@ -263,7 +268,7 @@ class Trainer(object):
                 if oov_acc > 0:
                     epoch_oov_acc += oov_acc
                     oov_batches += 1
-        return epoch_loss / len(iterator), epoch_acc / len(iterator), epoch_oov_acc / oov_batches
+        return epoch_loss / len(iterator), epoch_acc / len(iterator), utils.safe_division(epoch_oov_acc, oov_batches)
 
     def oov_accuracy(self, words, predictions, labels):
         _, predictions = torch.max(predictions, 1)

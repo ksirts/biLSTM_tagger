@@ -34,3 +34,7 @@ def get_logger(fn, level='info'):
     logger.addHandler(f_handler)
 
     return logger
+
+
+def safe_division(x, y):
+    return 0.0 if y == 0 else x / y
