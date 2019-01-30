@@ -2,9 +2,14 @@ import os
 
 from torchtext import data
 
-lang_map = {'cs': 'Czech',
+lang_map = {'af': 'Afrikaans',
+            'ar': 'Arabic',
+            'be': 'Belarusian',
+            'bg': 'Bulgarian',
+            'cs': 'Czech',
             'en': 'English',
             'et': 'Estonian',
+            'eu': 'Basque',
             'kk': 'Kazakh',
             'ro': 'Romanian'}
 
