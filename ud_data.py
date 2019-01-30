@@ -5,8 +5,6 @@ from torchtext import data
 lang_map = {'en': 'English',
             'et': 'Estonian'}
 
-col_list = []
-
 
 class SequenceTaggingDataset(data.Dataset):
     """Defines a dataset for sequence tagging. Examples in this dataset
@@ -58,7 +56,6 @@ class UDPOS(SequenceTaggingDataset):
     @classmethod
     def splits(cls, path=None, root='.data', train=None, validation=None, test=None, **kwargs):
         cls.name = 'ud-treebanks-v2.1'
-        print(kwargs)
         cls.dirname = 'UD_{}'.format(lang_map[kwargs['lang']])
        #  print(root, cls.name, cls.dirname)
 
@@ -85,7 +82,7 @@ class MorphTaggingDataset(data.Dataset):
 
     def __init__(self, path, fields, logger, separator='\t'):
         examples = []
-        columns = {}
+        cols = []
         logger.info('input path: {}'.format(path))
         with open(path) as input_file:
             for line in input_file:
@@ -95,28 +92,33 @@ class MorphTaggingDataset(data.Dataset):
                 if line.startswith('#'):
                     continue
                 elif line == "":
-                    if columns:
-                        examples.append(data.Example.fromdict(columns, fields))
-                    columns = {}
+                    if cols:
+                        columns = [cols[1], []]
+                        for pos, morph in zip(cols[3], cols[5]):
+                            columns[1].append(pos + '|' + morph)
+                        examples.append(data.Example.fromlist(columns, fields))
+                    cols = []
                 else:
                     for i, column in enumerate(line.split(separator)):
-                        if len(columns) < i + 1:
-                            columns.append([])
-                        columns[i].append(column)
+                        if len(cols) < i + 1:
+                            cols.append([])
+                        cols[i].append(column)
 
-            if columns:
+            if cols:
+                columns = [cols[1], []]
+                for pos, morph in zip(cols[3], cols[5]):
+                    columns[1].append(pos + '|' + morph)
                 examples.append(data.Example.fromlist(columns, fields))
         super(MorphTaggingDataset, self).__init__(examples, fields)
 
 
-class UDPOSMorph(SequenceTaggingDataset):
+class UDPOSMorph(MorphTaggingDataset):
 
     # Universal Dependencies dataset
 
     @classmethod
     def splits(cls, path=None, root='.data', train=None, validation=None, test=None, **kwargs):
         cls.name = 'ud-treebanks-v2.1'
-        print(kwargs)
         cls.dirname = 'UD_{}'.format(lang_map[kwargs['lang']])
        #  print(root, cls.name, cls.dirname)
 

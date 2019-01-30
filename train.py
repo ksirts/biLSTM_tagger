@@ -12,7 +12,7 @@ from torchtext import data
 import torch.nn as nn
 import torch.optim as optim
 
-from ud_data import UDPOSMorph
+from ud_data import UDPOS, UDPOSMorph
 import utils
 
 from model import Model
@@ -44,6 +44,7 @@ def parse_arguments():
     parser.add_argument('--char-hidden', default=75, type=int, help='Char encoder hidden dimension')
     parser.add_argument('--test', action='store_true', help='Evaluate the model on the test set after training')
     parser.add_argument('--index', type=int, help='If given then indexes the runs of the same model')
+    parser.add_argument('--task', default='pos', choices=['pos', 'posmorph'])
     args = parser.parse_args()
 
     return args
@@ -73,25 +74,37 @@ class Trainer(object):
 
 
 
-    def load_data(self, lang, device):
+    def load_data(self, lang, device, task):
         # Create fields
         WORD = data.Field(init_token="<bos>", eos_token="<eos>", include_lengths=True, lower=True, batch_first=True)
-        UD_TAG = data.Field(init_token="<bos>", eos_token="<eos>", unk_token=None, batch_first=True)
+        LABEL = data.Field(init_token="<bos>", eos_token="<eos>", unk_token=None, batch_first=True)
         CHAR_NESTING = data.Field(tokenize=list, init_token="<bos>", eos_token="<eos>")
         CHAR = data.NestedField(CHAR_NESTING, init_token="<bos>", eos_token="<eos>", include_lengths=True)
 
-        fields = ((None, None), (('word', 'char'), (WORD, CHAR)), (None, None), ('udtag', UD_TAG))
-        self.logger.info('# fields: {}'.format(fields))
+        if task == 'pos':
+            fields = ((None, None), (('word', 'char'), (WORD, CHAR)), (None, None), ('label', LABEL))
+            self.logger.info('# fields: {}'.format(fields))
 
-        train_data, valid_data, test_data = UDPOSMorph.splits(root='data', fields=fields,
-                                                              train='{}-ud-train.conllu'.format(lang),
-                                                              validation='{}-ud-dev.conllu'.format(lang),
-                                                              test='{}-ud-test.conllu'.format(lang),
-                                                              lang=lang,
-                                                              logger=self.logger)
+            train_data, valid_data, test_data = UDPOS.splits(root='data', fields=fields,
+                                                                  train='{}-ud-train.conllu'.format(lang),
+                                                                  validation='{}-ud-dev.conllu'.format(lang),
+                                                                  test='{}-ud-test.conllu'.format(lang),
+                                                                  lang=lang,
+                                                                  logger=self.logger)
+        else:
+            assert task == 'posmorph'
+            fields = ((('word', 'char'), (WORD, CHAR)),('label', LABEL))
+            self.logger.info('# fields: {}'.format(fields))
+
+            train_data, valid_data, test_data = UDPOSMorph.splits(root='data', fields=fields,
+                                                             train='{}-ud-train.conllu'.format(lang),
+                                                             validation='{}-ud-dev.conllu'.format(lang),
+                                                             test='{}-ud-test.conllu'.format(lang),
+                                                             lang=lang,
+                                                             logger=self.logger)
         # Create vocabularies
         WORD.build_vocab(train_data)
-        UD_TAG.build_vocab(train_data)
+        LABEL.build_vocab(train_data)
         CHAR.build_vocab(train_data)
 
         self.word_field = WORD
@@ -104,10 +117,10 @@ class Trainer(object):
         #    WORD.vocab.load_vectors(vectors)
 
         self.logger.info('# Word vocab size: {}'.format(len(WORD.vocab)))
-        self.logger.info('# Tag vocab size: {}'.format(len(UD_TAG.vocab)))
+        self.logger.info('# Tag vocab size: {}'.format(len(LABEL.vocab)))
         self.logger.info('# Char vocab size: {}'.format(len(CHAR.vocab)))
         self.params['num_words'] = len(WORD.vocab)
-        self.params['num_tags'] = len(UD_TAG.vocab)
+        self.params['num_tags'] = len(LABEL.vocab)
         self.params['num_chars'] = len(CHAR.vocab)
 
         train_iterator, dev_iterator, test_iterator = data.BucketIterator.splits(
@@ -115,7 +128,7 @@ class Trainer(object):
             batch_size=self.params['batch_size'],
             sort_within_batch=True,
             repeat=False,
-            device=device)
+            device=-device)
         self.train_iterator = train_iterator
         self.dev_iterator = dev_iterator
         self.test_iterator = test_iterator
@@ -192,7 +205,7 @@ class Trainer(object):
             # Run forward pass
             predictions = self.model.get_predictions(batch)
 
-            labels = batch.udtag.reshape(-1)
+            labels = batch.label.reshape(-1)
             words = batch.word[0].reshape(-1)
 
             # Compute the loss, gradients, and update the parameters by
@@ -248,7 +261,7 @@ class Trainer(object):
             for i, batch in enumerate(iterator):
 
                 predictions = self.model.get_predictions(batch)
-                labels = batch.udtag.reshape(-1)
+                labels = batch.label.reshape(-1)
                 words = batch.word[0].reshape(-1)
 
                 loss = self.loss_function(predictions, labels)
@@ -294,7 +307,7 @@ def main():
 
 
     trainer = Trainer(logger, args)
-    trainer.load_data(args.lang, args.device)
+    trainer.load_data(args.lang, args.device, args.task)
     trainer.create_model()
 
     # Load previous model from file
