@@ -2,8 +2,16 @@ import os
 
 from torchtext import data
 
-lang_map = {'en': 'English',
-            'et': 'Estonian'}
+lang_map = {'af': 'Afrikaans',
+            'ar': 'Arabic',
+            'be': 'Belarusian',
+            'bg': 'Bulgarian',
+            'cs': 'Czech',
+            'en': 'English',
+            'et': 'Estonian',
+            'eu': 'Basque',
+            'kk': 'Kazakh',
+            'ro': 'Romanian'}
 
 
 class SequenceTaggingDataset(data.Dataset):
