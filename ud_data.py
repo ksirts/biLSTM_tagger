@@ -2,8 +2,11 @@ import os
 
 from torchtext import data
 
-lang_map = {'en': 'English',
-            'et': 'Estonian'}
+lang_map = {'cs': 'Czech',
+            'en': 'English',
+            'et': 'Estonian',
+            'kk': 'Kazakh',
+            'ro': 'Romanian'}
 
 
 class SequenceTaggingDataset(data.Dataset):
