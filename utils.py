@@ -38,3 +38,10 @@ def get_logger(fn, level='info'):
 
 def safe_division(x, y):
     return 0.0 if y == 0 else x / y
+
+
+def get_model_fn(model_name, index):
+    model_fn = model_name
+    if index is not None:
+        model_fn += '-' + str(index)
+    return model_fn

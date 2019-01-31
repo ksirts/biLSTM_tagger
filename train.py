@@ -29,8 +29,7 @@ def parse_arguments():
     parser = ArgumentParser(description="Sequence tagging model")
     parser.add_argument('--load', help='Load existing model from the given file path')
     parser.add_argument('--chars', action='store_true', help='Use character level model for embeddings')
-    parser.add_argument('--char-only', action='store_true', help='Use character level model only for embeddings')
-    parser.add_argument('--pretrained', action='store_true', help='Use pretrained embeddings')
+    parser.add_argument('--words', default=None, choices=['random'], help='How to use word embeddings')
     parser.add_argument('--freeze', action='store_true', help='Freeze pretrained embeddings')
     parser.add_argument('--oov-embeddings', action='store_true', help='Load pretrained embeddings for all words')
     parser.add_argument('--input-projection', action='store_true', help='Use input projection in the word model')
@@ -38,7 +37,7 @@ def parse_arguments():
     parser.add_argument('--model-name', required=True, help='Name for the model')
     parser.add_argument('--log-level', default='info', choices=['info', 'debug'], help='Logging level')
     parser.add_argument('--batch-size', default=64, type=int, help='Batch size')
-    parser.add_argument('--word-dim', default=300, type=int, help='Word embedding dimension')
+    parser.add_argument('--word-emb', default=300, type=int, help='Word embedding dimension')
     parser.add_argument('--hidden-dim', default=300, type=int, help='Encoder hidden dimension')
     parser.add_argument('--char-emb', default=75, type=int, help='Char embedding dimension')
     parser.add_argument('--char-hidden', default=75, type=int, help='Char encoder hidden dimension')
@@ -53,17 +52,14 @@ def parse_arguments():
 
 class Trainer(object):
 
-    def __init__(self, logger, args):
+    def __init__(self, model_name, logger, args):
         self.logger = logger
+        self.model_type = self._get_model_type(args)
+        self.model_fn = model_name
+
         self.params = {}
-        self.params['model_type'] = self._get_model_type(args)
         self.params['batch_size'] = args.batch_size
-        self.params['char_emb'] = args.char_emb
-        self.params['char_hidden'] = args.char_hidden
         self.params['hidden_dim'] = args.hidden_dim
-        self.model_fn = args.model_name
-        if args.index is not None:
-            self.model_fn += '-' + str(args.index)
 
         self.train_iterator = None
         self.dev_iterator = None
@@ -129,13 +125,14 @@ class Trainer(object):
             batch_size=self.params['batch_size'],
             sort_within_batch=True,
             repeat=False,
-            device=-device)
+            device=-1)
         self.train_iterator = train_iterator
         self.dev_iterator = dev_iterator
         self.test_iterator = test_iterator
 
-    def create_model(self):
-        model_type = self.params['model_type']
+    def create_model(self, args):
+        self._set_params(args)
+        model_type = self.model_type
         logger = self.logger
         params = self.params
         self.model = Model(model_type, logger, params)
@@ -158,8 +155,24 @@ class Trainer(object):
 
 
     def _get_model_type(self, args):
-        if args.char_only:
+        # Character only model
+        if args.words is None:
+            assert args.chars
             return 'char'
+
+        # Model with randomly initialized word embeddings
+        if args.words == 'random':
+            if args.chars:
+                return 'rnd+char'
+            else:
+                return 'rnd'
+
+    def _set_params(self, args):
+        if self.model_type in ('char', 'rnd+char'):
+            self.params['char_emb'] = args.char_emb
+            self.params['char_hidden'] = args.char_hidden
+        if self.model_type in ('rnd', 'rnd+char'):
+            self.params['word_emb'] = args.word_emb
 
     def train(self, max_epoch=400, es_limit=40):
         ''' Train the model
@@ -299,19 +312,16 @@ class Trainer(object):
 def main():
 
     args = parse_arguments()
-    args.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+    device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     
-    model_name = args.model_name
-    if args.index is not None:
-        model_name += '-' + str(args.index)
+    model_name = utils.get_model_fn(args.model_name, args.index)
     logger = utils.get_logger(model_name + '.log', level=args.log_level)
     for key, val in vars(args).items():
         logger.info('## {}: {}'.format(key, val))
 
-
-    trainer = Trainer(logger, args)
-    trainer.load_data(args.lang, args.device, args.task)
-    trainer.create_model()
+    trainer = Trainer(model_name, logger, args)
+    trainer.load_data(args.lang, device, args.task)
+    trainer.create_model(args)
 
     # Load previous model from file
     if args.load is not None:
@@ -320,7 +330,7 @@ def main():
     else:
         logger.info('# Creating new parameters ...')
 
-    trainer.create_optimizer(device=args.device)
+    trainer.create_optimizer(device=device)
 
     trainer.train()
 

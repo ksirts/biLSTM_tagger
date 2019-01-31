@@ -2,6 +2,7 @@ import torch
 
 from char_embeddings import CharEmbeddings
 from lstm_encoder import CharacterEncoder
+from lstm_encoder import WordEncoder
 
 class Model(object):
 
@@ -12,23 +13,51 @@ class Model(object):
         self.model_type = model_type
 
         if model_type == 'char':
-            self._create_char_only_model(char_emb=params['char_emb'],
-                                         char_hidden=params['char_hidden'],
-                                         char_vocab=params['num_chars'],
-                                         hidden_dim=params['hidden_dim'],
-                                         output_dim=params['num_tags'])
+            self._create_char_only_model(params)
+        elif model_type.startswith('rnd'):
+            self._create_rand_embedding_model(params)
 
 
-    def _create_char_only_model(self, char_emb, char_hidden, char_vocab, hidden_dim, output_dim):
+    def _create_char_only_model(self, params):
         ## Creating models
         # Char only model
         self.logger.info('# Creating char model ...')
+        char_emb = params['char_emb']
+        char_hidden = params['char_hidden']
+        char_vocab = params['num_chars']
         self.char_encoder = CharEmbeddings(embedding_dim=char_emb, hidden_dim=char_hidden,
                                         vocab_size=char_vocab)
         self.logger.info('# Creating encoder ...')
         embedding_dim = 4 * char_hidden
+        hidden_dim = params['hidden_dim']
+        output_dim = params['num_tags']
         self.model = CharacterEncoder(hidden_dim=hidden_dim, tagset_size=output_dim,
                                      embedding_dim=embedding_dim)
+
+    def _create_rand_embedding_model(self, params):
+        ## Creating models
+        # Char only model
+        self.logger.info('# Creating a model with random embeddings ...')
+        char_output = 0
+
+        if self.model_type == 'rnd+char':
+            self.logger.info('# Creating char model ...')
+            char_emb = params['char_emb']
+            char_hidden = params['char_hidden']
+            char_vocab = params['num_chars']
+            self.char_encoder = CharEmbeddings(embedding_dim=char_emb, hidden_dim=char_hidden,
+                                            vocab_size=char_vocab)
+            char_output = 4 * char_hidden
+
+        self.logger.info('# Creating encoder ...')
+        word_emb = params['word_emb']
+        vocab_size = params['num_words']
+        embedding_dim = word_emb + char_output
+        hidden_dim = params['hidden_dim']
+        output_dim = params['num_tags']
+        self.model = WordEncoder(word_embedding_dim=word_emb, vocab_size=vocab_size,
+                                 embedding_dim=embedding_dim,
+                                 hidden_dim=hidden_dim, tagset_size=output_dim)
 
     def load(self, fn):
         # TODO: check the existence of the file path
@@ -75,6 +104,12 @@ class Model(object):
         predictions = None
         if self.model_type == 'char':
             predictions = self._get_char_model_predictions(batch)
+
+        elif self.model_type == 'rnd':
+            predictions = self._get_word_model_predictions(batch)
+
+        elif self.model_type == 'rnd+char':
+            predictions = self._get_word_and_char_model_predictions(batch)
         # words, lengths = batch.word
         # char_embeddings = None
 
@@ -97,4 +132,18 @@ class Model(object):
         char_embeddings = self.char_encoder(chars, char_lengths)
         _, lengths = batch.word
         predictions = self.model(lengths=lengths, char_embeddings=char_embeddings)
+        return predictions
+
+    def _get_word_model_predictions(self, batch):
+        assert self.char_encoder is None
+        words, lengths = batch.word
+        predictions = self.model(words=words, lengths=lengths)
+        return predictions
+
+    def _get_word_and_char_model_predictions(self, batch):
+        assert self.char_encoder is not None
+        chars, _, char_lengths = batch.char
+        char_embeddings = self.char_encoder(chars, char_lengths)
+        words, lengths = batch.word
+        predictions = self.model(words=words, lengths=lengths, char_embeddings=char_embeddings)
         return predictions
