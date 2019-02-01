@@ -2,6 +2,8 @@ import logging
 import sys
 import os.path
 
+import torch
+
 def get_logger(fn, level='info'):
     '''
     create a logger and output to file and stdout
@@ -45,3 +47,10 @@ def get_model_fn(model_name, index):
     if index is not None:
         model_fn += '-' + str(index)
     return model_fn
+
+
+def sample_unks(words, unk_id, unk_th):
+    unk_mask = torch.rand(words.size())
+    unk_mask = unk_mask > unk_th
+    words[unk_mask] = unk_id
+    return words

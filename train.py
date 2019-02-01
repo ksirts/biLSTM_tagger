@@ -125,7 +125,7 @@ class Trainer(object):
             batch_size=self.params['batch_size'],
             sort_within_batch=True,
             repeat=False,
-            device=-1)
+            device=device)
         self.train_iterator = train_iterator
         self.dev_iterator = dev_iterator
         self.test_iterator = test_iterator
@@ -135,7 +135,8 @@ class Trainer(object):
         model_type = self.model_type
         logger = self.logger
         params = self.params
-        self.model = Model(model_type, logger, params)
+        unk_id = self.word_field.vocab.stoi['<unk>']
+        self.model = Model(model_type, logger, unk_id, params)
 
     def create_optimizer(self, device):
         self.logger.info('# Creating loss function ...')
@@ -188,7 +189,7 @@ class Trainer(object):
         self.logger.info('# Start training ...')
         for epoch in range(max_epoch):
             if epoch - best_epoch > es_limit:
-                self.logger.info('# Finished training after {:d} epochs'.format(epoch-1))
+                self.logger.info('# Finished training after {:d} epochs\n'.format(epoch-1))
                 break
 
             train_loss, train_acc = self._train_epoch()
@@ -237,6 +238,7 @@ class Trainer(object):
 
             if i % 10 == 0:
                 self.logger.debug(f'| Batch: {i:02} | Batch Loss: {loss:.3f} | Batch Acc: {acc*100:.2f}%')
+                # print('UNK vector:', self.model.unk_vector)
 
         return epoch_loss / len(self.train_iterator), epoch_acc / len(self.train_iterator)
 

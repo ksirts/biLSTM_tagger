@@ -4,13 +4,17 @@ from char_embeddings import CharEmbeddings
 from lstm_encoder import CharacterEncoder
 from lstm_encoder import WordEncoder
 
+import utils
+
 class Model(object):
 
-    def __init__(self, model_type, logger, params):
+    def __init__(self, model_type, logger, unk_id, params):
         self.char_encoder = None
         self.model = None
         self.logger = logger
         self.model_type = model_type
+        self.unk_id = unk_id
+        self.unk_th = 0.9
 
         if model_type == 'char':
             self._create_char_only_model(params)
@@ -79,6 +83,11 @@ class Model(object):
             params += list(self.char_encoder.parameters())
         return params
 
+    @property
+    def unk_vector(self):
+        ind = torch.Tensor([self.unk_id], device='cpu').long()
+        return self.model.word_embeddings(ind)
+
     def to_device(self, device):
         self.model = self.model.to(device)
         if self.char_encoder is not None:
@@ -137,6 +146,7 @@ class Model(object):
     def _get_word_model_predictions(self, batch):
         assert self.char_encoder is None
         words, lengths = batch.word
+        words = utils.sample_unks(words, self.unk_id, self.unk_th)
         predictions = self.model(words=words, lengths=lengths)
         return predictions
 
@@ -144,6 +154,8 @@ class Model(object):
         assert self.char_encoder is not None
         chars, _, char_lengths = batch.char
         char_embeddings = self.char_encoder(chars, char_lengths)
+
         words, lengths = batch.word
+        words = utils.sample_unks(words, self.unk_id, self.unk_th)
         predictions = self.model(words=words, lengths=lengths, char_embeddings=char_embeddings)
         return predictions
