@@ -109,16 +109,16 @@ class Model(object):
             torch.save(self.char_encoder.state_dict(), '.models/' + save_fn + '.char')
 
 
-    def get_predictions(self, batch):
+    def get_predictions(self, batch, train=True):
         predictions = None
         if self.model_type == 'char':
-            predictions = self._get_char_model_predictions(batch)
+            predictions = self._get_char_model_predictions(batch, train)
 
         elif self.model_type == 'rnd':
-            predictions = self._get_word_model_predictions(batch)
+            predictions = self._get_word_model_predictions(batch, train)
 
         elif self.model_type == 'rnd+char':
-            predictions = self._get_word_and_char_model_predictions(batch)
+            predictions = self._get_word_and_char_model_predictions(batch, train)
         # words, lengths = batch.word
         # char_embeddings = None
 
@@ -135,7 +135,7 @@ class Model(object):
         predictions = predictions.reshape(-1, predictions.size()[-1])
         return predictions
 
-    def _get_char_model_predictions(self, batch):
+    def _get_char_model_predictions(self, batch, train=True):
         assert self.char_encoder is not None
         chars, _, char_lengths = batch.char
         char_embeddings = self.char_encoder(chars, char_lengths)
@@ -143,19 +143,22 @@ class Model(object):
         predictions = self.model(lengths=lengths, char_embeddings=char_embeddings)
         return predictions
 
-    def _get_word_model_predictions(self, batch):
+    def _get_word_model_predictions(self, batch, train=True):
         assert self.char_encoder is None
         words, lengths = batch.word
-        words = utils.sample_unks(words, self.unk_id, self.unk_th)
+
+        if train:
+            words = utils.sample_unks(words, self.unk_id, self.unk_th)
         predictions = self.model(words=words, lengths=lengths)
         return predictions
 
-    def _get_word_and_char_model_predictions(self, batch):
+    def _get_word_and_char_model_predictions(self, batch, train=True):
         assert self.char_encoder is not None
         chars, _, char_lengths = batch.char
         char_embeddings = self.char_encoder(chars, char_lengths)
 
         words, lengths = batch.word
-        words = utils.sample_unks(words, self.unk_id, self.unk_th)
+        if train:
+            words = utils.sample_unks(words, self.unk_id, self.unk_th)
         predictions = self.model(words=words, lengths=lengths, char_embeddings=char_embeddings)
         return predictions

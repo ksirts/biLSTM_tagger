@@ -8,6 +8,7 @@ import numpy as np
 
 import torch
 from torchtext import data
+from torchtext import vocab
 
 import torch.nn as nn
 import torch.optim as optim
@@ -29,7 +30,7 @@ def parse_arguments():
     parser = ArgumentParser(description="Sequence tagging model")
     parser.add_argument('--load', help='Load existing model from the given file path')
     parser.add_argument('--chars', action='store_true', help='Use character level model for embeddings')
-    parser.add_argument('--words', default=None, choices=['random'], help='How to use word embeddings')
+    parser.add_argument('--words', default=None, choices=['random', 'fixed'], help='How to use word embeddings')
     parser.add_argument('--freeze', action='store_true', help='Freeze pretrained embeddings')
     parser.add_argument('--oov-embeddings', action='store_true', help='Load pretrained embeddings for all words')
     parser.add_argument('--input-projection', action='store_true', help='Use input projection in the word model')
@@ -68,9 +69,7 @@ class Trainer(object):
         self.optimizer = None
         self.loss_function = None
 
-
-
-    def load_data(self, lang, device, task):
+    def load_data(self, lang, device, task, pretrained=False):
         # Create fields
         WORD = data.Field(init_token="<bos>", eos_token="<eos>", include_lengths=True, lower=True, batch_first=True)
         LABEL = data.Field(init_token="<bos>", eos_token="<eos>", unk_token=None, batch_first=True)
@@ -106,8 +105,10 @@ class Trainer(object):
 
         self.word_field = WORD
 
-        # if args.pretrained:
-        #     vectors = vocab.FastText(language=args.lang)
+        if pretrained:
+            self.logger.info("# Loading word vectors from file")
+            vectors = vocab.FastText(language=lang)
+            WORD.vocab.load_vectors(vectors)
         #
         #    if args.oov_embeddings:
         #        WORD.vocab.extend(vectors)
@@ -220,7 +221,7 @@ class Trainer(object):
             self.optimizer.zero_grad()
 
             # Run forward pass
-            predictions = self.model.get_predictions(batch)
+            predictions = self.model.get_predictions(batch, train=True)
 
             labels = batch.label.reshape(-1)
             words = batch.word[0].reshape(-1)
@@ -278,7 +279,7 @@ class Trainer(object):
         with torch.no_grad():
             for i, batch in enumerate(iterator):
 
-                predictions = self.model.get_predictions(batch)
+                predictions = self.model.get_predictions(batch, train=False)
                 labels = batch.label.reshape(-1)
                 words = batch.word[0].reshape(-1)
 
@@ -322,7 +323,9 @@ def main():
         logger.info('## {}: {}'.format(key, val))
 
     trainer = Trainer(model_name, logger, args)
-    trainer.load_data(args.lang, device, args.task)
+
+    pretrained = args.words != 'random'
+    trainer.load_data(args.lang, device, args.task, pretrained=pretrained)
     trainer.create_model(args)
 
     # Load previous model from file
