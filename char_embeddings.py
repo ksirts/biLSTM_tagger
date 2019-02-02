@@ -6,8 +6,9 @@ from torch.nn.utils.rnn import pack_padded_sequence
 
 class CharEmbeddings(nn.Module):
 
-    def __init__(self, embedding_dim, hidden_dim, vocab_size):
+    def __init__(self, logger, embedding_dim, hidden_dim, vocab_size):
         super(CharEmbeddings, self).__init__()
+        self.logger = logger
         self.hidden_dim = hidden_dim
 
         self.char_embeddings = nn.Embedding(vocab_size, embedding_dim)

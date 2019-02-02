@@ -3,16 +3,18 @@ import torch
 from char_embeddings import CharEmbeddings
 from lstm_encoder import CharacterEncoder
 from lstm_encoder import WordEncoder
+# from lstm_encoder import FixedWordEncoder
 
 import utils
 
 class Model(object):
 
-    def __init__(self, model_type, logger, unk_id, params):
+    def __init__(self, model_type, logger, params, train_unk=False, unk_id=False):
         self.char_encoder = None
         self.model = None
         self.logger = logger
         self.model_type = model_type
+        self.train_unk = train_unk
         self.unk_id = unk_id
         self.unk_th = 0.9
 
@@ -20,6 +22,8 @@ class Model(object):
             self._create_char_only_model(params)
         elif model_type.startswith('rnd'):
             self._create_rand_embedding_model(params)
+        elif model_type.startswith('fix'):
+            self._create_fixed_embedding_model(params)
 
 
     def _create_char_only_model(self, params):
@@ -29,13 +33,13 @@ class Model(object):
         char_emb = params['char_emb']
         char_hidden = params['char_hidden']
         char_vocab = params['num_chars']
-        self.char_encoder = CharEmbeddings(embedding_dim=char_emb, hidden_dim=char_hidden,
+        self.char_encoder = CharEmbeddings(self.logger, embedding_dim=char_emb, hidden_dim=char_hidden,
                                         vocab_size=char_vocab)
         self.logger.info('# Creating encoder ...')
         embedding_dim = 4 * char_hidden
         hidden_dim = params['hidden_dim']
         output_dim = params['num_tags']
-        self.model = CharacterEncoder(hidden_dim=hidden_dim, tagset_size=output_dim,
+        self.model = CharacterEncoder(self.logger, hidden_dim=hidden_dim, tagset_size=output_dim,
                                      embedding_dim=embedding_dim)
 
     def _create_rand_embedding_model(self, params):
@@ -49,7 +53,7 @@ class Model(object):
             char_emb = params['char_emb']
             char_hidden = params['char_hidden']
             char_vocab = params['num_chars']
-            self.char_encoder = CharEmbeddings(embedding_dim=char_emb, hidden_dim=char_hidden,
+            self.char_encoder = CharEmbeddings(self.logger, embedding_dim=char_emb, hidden_dim=char_hidden,
                                             vocab_size=char_vocab)
             char_output = 4 * char_hidden
 
@@ -59,9 +63,33 @@ class Model(object):
         embedding_dim = word_emb + char_output
         hidden_dim = params['hidden_dim']
         output_dim = params['num_tags']
-        self.model = WordEncoder(word_embedding_dim=word_emb, vocab_size=vocab_size,
+        self.model = WordEncoder(self.logger, word_embedding_dim=word_emb, vocab_size=vocab_size,
                                  embedding_dim=embedding_dim,
                                  hidden_dim=hidden_dim, tagset_size=output_dim)
+
+    def _create_fixed_embedding_model(self, params):
+        self.logger.info('# Creating a model with fixed pretrained embeddings ...')
+        char_output = 0
+
+        if self.model_type == 'fix+char':
+            self.logger.info('# Creating char model ...')
+            char_emb = params['char_emb']
+            char_hidden = params['char_hidden']
+            char_vocab = params['num_chars']
+            self.char_encoder = CharEmbeddings(self.logger, embedding_dim=char_emb, hidden_dim=char_hidden,
+                                            vocab_size=char_vocab)
+            char_output = 4 * char_hidden
+
+        self.logger.info('# Creating encoder ...')
+        word_emb = params['word_emb']
+        vocab_size = params['num_words']
+        embedding_dim = word_emb + char_output
+        hidden_dim = params['hidden_dim']
+        output_dim = params['num_tags']
+        self.model = WordEncoder(self.logger, word_embedding_dim=word_emb, vocab_size=vocab_size,
+                                 embedding_dim=embedding_dim,
+                                 hidden_dim=hidden_dim, tagset_size=output_dim,
+                                 fixed=True)
 
     def load(self, fn):
         # TODO: check the existence of the file path
@@ -83,10 +111,10 @@ class Model(object):
             params += list(self.char_encoder.parameters())
         return params
 
-    @property
-    def unk_vector(self):
-        ind = torch.Tensor([self.unk_id], device='cpu').long()
-        return self.model.word_embeddings(ind)
+    # @property
+    # def unk_vector(self):
+    #     ind = torch.Tensor([self.unk_id], device='cpu').long()
+    #     return self.model.word_embeddings(ind)
 
     def to_device(self, device):
         self.model = self.model.to(device)
@@ -114,10 +142,10 @@ class Model(object):
         if self.model_type == 'char':
             predictions = self._get_char_model_predictions(batch, train)
 
-        elif self.model_type == 'rnd':
+        elif self.model_type in ('rnd', 'fix'):
             predictions = self._get_word_model_predictions(batch, train)
 
-        elif self.model_type == 'rnd+char':
+        elif self.model_type in ('rnd+char', 'fix+char'):
             predictions = self._get_word_and_char_model_predictions(batch, train)
         # words, lengths = batch.word
         # char_embeddings = None
@@ -147,7 +175,7 @@ class Model(object):
         assert self.char_encoder is None
         words, lengths = batch.word
 
-        if train:
+        if train and self.train_unk:
             words = utils.sample_unks(words, self.unk_id, self.unk_th)
         predictions = self.model(words=words, lengths=lengths)
         return predictions
@@ -158,7 +186,10 @@ class Model(object):
         char_embeddings = self.char_encoder(chars, char_lengths)
 
         words, lengths = batch.word
-        if train:
+        if train and self.train_unk:
             words = utils.sample_unks(words, self.unk_id, self.unk_th)
         predictions = self.model(words=words, lengths=lengths, char_embeddings=char_embeddings)
         return predictions
+
+    def copy_embeddings(self, pretrained_embeddings):
+        self.model.word_embeddings.weight.data.copy_(pretrained_embeddings)

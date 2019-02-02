@@ -1,8 +1,8 @@
 import sys
-sys.stderr.flush()
-sys.stdout.flush()
+import time
 
 from argparse import ArgumentParser
+from collections import Counter
 
 import numpy as np
 
@@ -45,6 +45,7 @@ def parse_arguments():
     parser.add_argument('--test', action='store_true', help='Evaluate the model on the test set after training')
     parser.add_argument('--index', type=int, help='If given then indexes the runs of the same model')
     parser.add_argument('--task', default='pos', choices=['pos', 'posmorph'])
+    parser.add_argument('--train-unk', action='store_true', help='Train unk vector')
     args = parser.parse_args()
 
     return args
@@ -57,6 +58,7 @@ class Trainer(object):
         self.logger = logger
         self.model_type = self._get_model_type(args)
         self.model_fn = model_name
+        self.train_unk = args.train_unk
 
         self.params = {}
         self.params['batch_size'] = args.batch_size
@@ -104,11 +106,27 @@ class Trainer(object):
         CHAR.build_vocab(train_data)
 
         self.word_field = WORD
-
         if pretrained:
             self.logger.info("# Loading word vectors from file")
             vectors = vocab.FastText(language=lang)
+            # new_stoi = Counter()
+            # new_itos = list()
+            # out_words = []
+            # for s, i in WORD.vocab.stoi.items():
+            #     if s in vectors.stoi:
+            #         new_stoi[s] = len(new_stoi)
+            #         new_itos.append(s)
+            #     else:
+            #         out_words.append(s)
+            # self.trained_vectors = len(new_stoi)
+            # for s in out_words:
+            #     new_stoi[s] = len(new_stoi)
+            #     new_itos.append(s)
+            # self.word_field.vocab.itos = new_itos
+             #self.word_field.vocab.stoi = new_stoi
             WORD.vocab.load_vectors(vectors)
+
+            # self.logger.info('# Number of trained embeddings: {}'.format(self.trained_vectors))
         #
         #    if args.oov_embeddings:
         #        WORD.vocab.extend(vectors)
@@ -126,7 +144,7 @@ class Trainer(object):
             batch_size=self.params['batch_size'],
             sort_within_batch=True,
             repeat=False,
-            device=device)
+            device=-1)
         self.train_iterator = train_iterator
         self.dev_iterator = dev_iterator
         self.test_iterator = test_iterator
@@ -137,7 +155,12 @@ class Trainer(object):
         logger = self.logger
         params = self.params
         unk_id = self.word_field.vocab.stoi['<unk>']
-        self.model = Model(model_type, logger, unk_id, params)
+        self.model = Model(model_type, logger, params, train_unk=args.train_unk, unk_id=unk_id)
+
+        if model_type.startswith('fix'):
+            self.logger.info('# Copying pretrained embeddings to model...')
+            pretrained_embeddings = self.word_field.vocab.vectors
+            self.model.copy_embeddings(pretrained_embeddings)
 
     def create_optimizer(self, device):
         self.logger.info('# Creating loss function ...')
@@ -169,11 +192,18 @@ class Trainer(object):
             else:
                 return 'rnd'
 
+        # Model with pretrained fixed embeddings
+        if args.words == 'fixed':
+            if args.chars:
+                return 'fix+char'
+            else:
+                return 'fix'
+
     def _set_params(self, args):
-        if self.model_type in ('char', 'rnd+char'):
+        if self.model_type in ('char', 'rnd+char', 'fix+char'):
             self.params['char_emb'] = args.char_emb
             self.params['char_hidden'] = args.char_hidden
-        if self.model_type in ('rnd', 'rnd+char'):
+        if self.model_type in ('rnd', 'rnd+char', 'fix', 'fix+char'):
             self.params['word_emb'] = args.word_emb
 
     def train(self, max_epoch=400, es_limit=40):
@@ -220,11 +250,12 @@ class Trainer(object):
             # Clear out gradients
             self.optimizer.zero_grad()
 
+            labels = batch.label.reshape(-1)
+            words = batch.word[0].reshape(-1)
+
             # Run forward pass
             predictions = self.model.get_predictions(batch, train=True)
 
-            labels = batch.label.reshape(-1)
-            words = batch.word[0].reshape(-1)
 
             # Compute the loss, gradients, and update the parameters by
             # calling optimizer.step()
