@@ -53,11 +53,12 @@ def parse_arguments():
 
 class Trainer(object):
 
-    def __init__(self, model_name, logger, args):
+    def __init__(self, model_name, logger, device, args):
         self.logger = logger
         self.model_type = self._get_model_type(args)
         self.model_fn = model_name
         self.train_unk = args.train_unk
+        self.device = device
 
         self.params = {}
         self.params['batch_size'] = args.batch_size
@@ -70,7 +71,7 @@ class Trainer(object):
         self.optimizer = None
         self.loss_function = None
 
-    def load_data(self, lang, device, task, pretrained=False):
+    def load_data(self, lang, task, pretrained=False, oov_embeddings=False):
         # Create fields
         WORD = data.Field(init_token="<bos>", eos_token="<eos>", include_lengths=True, lower=True, batch_first=True)
         LABEL = data.Field(init_token="<bos>", eos_token="<eos>", unk_token=None, batch_first=True)
@@ -126,10 +127,10 @@ class Trainer(object):
             WORD.vocab.load_vectors(vectors)
 
             # self.logger.info('# Number of trained embeddings: {}'.format(self.trained_vectors))
-        #
-        #    if args.oov_embeddings:
-        #        WORD.vocab.extend(vectors)
-        #    WORD.vocab.load_vectors(vectors)
+            if oov_embeddings:
+                self.logger.info("# Copying all pretrained word embeddings into vocabulary")
+                WORD.vocab.extend(vectors)
+                WORD.vocab.load_vectors(vectors)
 
         self.logger.info('# Word vocab size: {}'.format(len(WORD.vocab)))
         self.logger.info('# Tag vocab size: {}'.format(len(LABEL.vocab)))
@@ -154,9 +155,10 @@ class Trainer(object):
         logger = self.logger
         params = self.params
         unk_id = self.word_field.vocab.stoi['<unk>']
-        self.model = Model(model_type, logger, params, train_unk=args.train_unk, unk_id=unk_id)
+        self.model = Model(model_type, logger, params, vocab=self.word_field.vocab, device=self.device,
+                           train_unk=args.train_unk, unk_id=unk_id)
 
-        if model_type.startswith('fix') or model_type.startswith('tune'):
+        if model_type.startswith('tune'):
             self.logger.info('# Copying pretrained embeddings to model...')
             pretrained_embeddings = self.word_field.vocab.vectors
             self.model.copy_embeddings(pretrained_embeddings)
@@ -192,7 +194,7 @@ class Trainer(object):
                 return 'rnd'
 
         # Model with pretrained fixed embeddings
-        if args.words == 'fixed':
+        if args.words == 'fixed' and args.oov_embeddings is False:
             if args.chars:
                 return 'fix+char'
             else:
@@ -205,11 +207,18 @@ class Trainer(object):
             else:
                 return 'tune'
 
+        # Model with pretrained fixed embedings that are also used during testing
+        if args.words == 'fixed' and args.oov_embeddings is True:
+            if args.chars:
+                return 'fix-oov+char'
+            else:
+                return 'fix-oov'
+
     def _set_params(self, args):
         if 'char' in self.model_type:
             self.params['char_emb'] = args.char_emb
             self.params['char_hidden'] = args.char_hidden
-        if self.model_type in ('rnd', 'rnd+char', 'fix', 'fix+char', 'tune', 'tune+char'):
+        if self.model_type != 'char':
             self.params['word_emb'] = args.word_emb
 
     def train(self, max_epoch=400, es_limit=40):
@@ -359,10 +368,10 @@ def main():
     for key, val in vars(args).items():
         logger.info('## {}: {}'.format(key, val))
 
-    trainer = Trainer(model_name, logger, args)
+    trainer = Trainer(model_name, logger, device, args)
 
-    pretrained = args.words != 'random'
-    trainer.load_data(args.lang, device, args.task, pretrained=pretrained)
+    pretrained = args.words in ('fixed', 'tuned')
+    trainer.load_data(args.lang, args.task, pretrained=pretrained, oov_embeddings=args.oov_embeddings)
     trainer.create_model(args)
 
     # Load previous model from file

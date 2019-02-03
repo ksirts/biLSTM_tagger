@@ -1,15 +1,16 @@
 import torch
+import torch.nn.functional as F
 
 from char_embeddings import CharEmbeddings
 from lstm_encoder import CharacterEncoder
 from lstm_encoder import WordEncoder
-# from lstm_encoder import FixedWordEncoder
+from lstm_encoder import FixedWordEncoder
 
 import utils
 
 class Model(object):
 
-    def __init__(self, model_type, logger, params, train_unk=False, unk_id=False):
+    def __init__(self, model_type, logger, params, device='cpu', vocab=None, train_unk=False, unk_id=False):
         self.char_encoder = None
         self.model = None
         self.logger = logger
@@ -17,6 +18,8 @@ class Model(object):
         self.train_unk = train_unk
         self.unk_id = unk_id
         self.unk_th = 0.9
+        self.vocab=vocab
+        self.device = device
 
         if model_type == 'char':
             self._create_char_only_model(params)
@@ -26,6 +29,8 @@ class Model(object):
             self._create_fixed_embedding_model(params)
         elif model_type.startswith('tune'):
             self._create_trainable_embedding_model(params)
+        elif model_type.startswith('tune'):
+            self._create_fixed_embedding_model(params)
 
 
     def _create_char_only_model(self, params):
@@ -73,7 +78,7 @@ class Model(object):
         self.logger.info('# Creating a model with fixed pretrained embeddings ...')
         char_output = 0
 
-        if self.model_type == 'fix+char':
+        if 'char' in self.model_type:
             self.logger.info('# Creating char model ...')
             char_emb = params['char_emb']
             char_hidden = params['char_hidden']
@@ -82,16 +87,14 @@ class Model(object):
                                             vocab_size=char_vocab)
             char_output = 4 * char_hidden
 
-        self.logger.info('# Creating encoder ...')
+        self.logger.info('# Creating encoder with fixed embeddings ...')
         word_emb = params['word_emb']
-        vocab_size = params['num_words']
         embedding_dim = word_emb + char_output
         hidden_dim = params['hidden_dim']
         output_dim = params['num_tags']
-        self.model = WordEncoder(self.logger, word_embedding_dim=word_emb, vocab_size=vocab_size,
+        self.model = FixedWordEncoder(self.logger,
                                  embedding_dim=embedding_dim,
-                                 hidden_dim=hidden_dim, tagset_size=output_dim,
-                                 fixed=True)
+                                 hidden_dim=hidden_dim, tagset_size=output_dim)
 
     def load(self, fn):
         # TODO: check the existence of the file path
@@ -144,11 +147,17 @@ class Model(object):
         if self.model_type == 'char':
             predictions = self._get_char_model_predictions(batch, train)
 
-        elif self.model_type in ('rnd', 'fix', 'tune'):
+        elif self.model_type in ('rnd', 'tune'):
             predictions = self._get_word_model_predictions(batch, train)
 
-        elif self.model_type in ('rnd+char', 'fix+char', 'tune+char'):
+        elif self.model_type in ('fix', 'fix-oov'):
+            predictions = self._get_fixed_word_model_predictions(batch, train)
+
+        elif self.model_type in ('rnd+char', 'tune+char'):
             predictions = self._get_word_and_char_model_predictions(batch, train)
+
+        elif self.model_type in ('fix+char', 'fix-oov+char'):
+            predictions = self._get_fixed_word_and_char_model_predictions(batch, train)
         # words, lengths = batch.word
         # char_embeddings = None
 
@@ -182,6 +191,21 @@ class Model(object):
         predictions = self.model(words=words, lengths=lengths)
         return predictions
 
+    def _get_fixed_word_model_predictions(self, batch, train=True):
+        assert self.char_encoder is None
+        assert self.vocab is not None
+        words, lengths = batch.word
+
+        if train and self.train_unk:
+            words = utils.sample_unks(words, self.unk_id, self.unk_th)
+
+        word_embeddings = F.embedding(words.cpu(), self.vocab.vectors)
+        word_embeddings = word_embeddings.to(device=self.device)
+
+        predictions = self.model(word_embeddings=word_embeddings, lengths=lengths)
+        return predictions
+
+
     def _get_word_and_char_model_predictions(self, batch, train=True):
         assert self.char_encoder is not None
         chars, _, char_lengths = batch.char
@@ -191,6 +215,20 @@ class Model(object):
         if train and self.train_unk:
             words = utils.sample_unks(words, self.unk_id, self.unk_th)
         predictions = self.model(words=words, lengths=lengths, char_embeddings=char_embeddings)
+        return predictions
+
+    def _get_fixed_word_and_char_model_predictions(self, batch, train=True):
+        assert self.char_encoder is not None
+        chars, _, char_lengths = batch.char
+        char_embeddings = self.char_encoder(chars, char_lengths)
+
+        words, lengths = batch.word
+        if train and self.train_unk:
+            words = utils.sample_unks(words, self.unk_id, self.unk_th)
+
+        word_embeddings = F.embedding(words.cpu(), self.vocab.vectors)
+        word_embeddings = word_embeddings.to(device=self.device)
+        predictions = self.model(word_embeddings=word_embeddings, lengths=lengths, char_embeddings=char_embeddings)
         return predictions
 
     def copy_embeddings(self, pretrained_embeddings):

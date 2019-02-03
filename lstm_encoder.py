@@ -15,6 +15,7 @@ class CharacterEncoder(nn.Module):
 
     def __init__(self, logger, hidden_dim, tagset_size, embedding_dim):
         self.logger = logger
+        self.logger.info('# Creating CharacterEncoder')
         super(CharacterEncoder, self).__init__()
         self.hidden_dim = hidden_dim
 
@@ -47,14 +48,12 @@ class WordEncoder(nn.Module):
        to the forward method.
     '''
 
-    def __init__(self, logger, word_embedding_dim, vocab_size, embedding_dim, hidden_dim, tagset_size, fixed=False):
+    def __init__(self, logger, word_embedding_dim, vocab_size, embedding_dim, hidden_dim, tagset_size):
         super(WordEncoder, self).__init__()
         self.logger = logger
+        self.logger.info('# Creating WordEncoder')
 
         self.word_embeddings = nn.Embedding(vocab_size, word_embedding_dim)
-        if fixed:
-            self.logger.info('# Freezing word embedding layer ...')
-            self.word_embeddings.weight.requires_grad = False
 
         self.hidden_dim = hidden_dim
 
@@ -95,21 +94,10 @@ class FixedWordEncoder(nn.Module):
        to the forward method.
     '''
 
-    def __init__(self, logger, word_embedding_dim, vocab_size, embedding_dim, hidden_dim, tagset_size, trained_vectors):
+    def __init__(self, logger, embedding_dim, hidden_dim, tagset_size):
         super(FixedWordEncoder, self).__init__()
         self.logger = logger
-        self.trained_vectors = trained_vectors
-        self.word_embedding_dim = word_embedding_dim
-
-        self.word_embeddings = nn.Embedding(vocab_size, word_embedding_dim)
-        self.logger.info('# Freezing word embedding layer ...')
-        self.word_embeddings.weight.requires_grad = False
-
-        assert trained_vectors < vocab_size
-
-        self.logger.info('# Creating the embedding layer for trainable embeddings')
-        self.logger.info('# Number of trainable embedddings: {:d}'.format(vocab_size-trained_vectors))
-        self.train_embeddings = nn.Embedding(vocab_size, word_embedding_dim)
+        self.logger.info('# Creating FixedWordEncoder')
 
         self.hidden_dim = hidden_dim
 
@@ -122,16 +110,8 @@ class FixedWordEncoder(nn.Module):
         linear_in = 2 * hidden_dim
         self.hidden2tag = nn.Linear(linear_in, tagset_size)
 
-    def forward(self, words, lengths, char_embeddings=None):
-        print(self.train_embeddings.weight.data[0])
-        self.train_embeddings.weight.data[:self.trained_vectors] = torch.zeros(self.trained_vectors, self.word_embedding_dim)
-        print(self.train_embeddings.weight.data[0])
-
-        fixed_embeds = self.word_embeddings(words)
-        trained_embeds = self.train_embeddings(words)
-        word_embeds = fixed_embeds + trained_embeds
-        word_embeds = self.dropout(word_embeds)
-
+    def forward(self, word_embeddings, lengths, char_embeddings=None):
+        word_embeds = self.dropout(word_embeddings)
 
         if char_embeddings is not None:
             char_embeds = self.dropout(char_embeddings)
