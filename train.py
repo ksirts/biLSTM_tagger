@@ -30,8 +30,7 @@ def parse_arguments():
     parser = ArgumentParser(description="Sequence tagging model")
     parser.add_argument('--load', help='Load existing model from the given file path')
     parser.add_argument('--chars', action='store_true', help='Use character level model for embeddings')
-    parser.add_argument('--words', default=None, choices=['random', 'fixed'], help='How to use word embeddings')
-    parser.add_argument('--freeze', action='store_true', help='Freeze pretrained embeddings')
+    parser.add_argument('--words', default=None, choices=['random', 'fixed', 'tuned'], help='How to use word embeddings')
     parser.add_argument('--oov-embeddings', action='store_true', help='Load pretrained embeddings for all words')
     parser.add_argument('--input-projection', action='store_true', help='Use input projection in the word model')
     parser.add_argument('--lang', default='en', help='Language of the dataset')
@@ -157,7 +156,7 @@ class Trainer(object):
         unk_id = self.word_field.vocab.stoi['<unk>']
         self.model = Model(model_type, logger, params, train_unk=args.train_unk, unk_id=unk_id)
 
-        if model_type.startswith('fix'):
+        if model_type.startswith('fix') or model_type.startswith('tune'):
             self.logger.info('# Copying pretrained embeddings to model...')
             pretrained_embeddings = self.word_field.vocab.vectors
             self.model.copy_embeddings(pretrained_embeddings)
@@ -199,11 +198,18 @@ class Trainer(object):
             else:
                 return 'fix'
 
+        # Model with fine-tuned word embeddings
+        if args.words == 'tuned':
+            if args.chars:
+                return 'tune+char'
+            else:
+                return 'tune'
+
     def _set_params(self, args):
-        if self.model_type in ('char', 'rnd+char', 'fix+char'):
+        if 'char' in self.model_type:
             self.params['char_emb'] = args.char_emb
             self.params['char_hidden'] = args.char_hidden
-        if self.model_type in ('rnd', 'rnd+char', 'fix', 'fix+char'):
+        if self.model_type in ('rnd', 'rnd+char', 'fix', 'fix+char', 'tune', 'tune+char'):
             self.params['word_emb'] = args.word_emb
 
     def train(self, max_epoch=400, es_limit=40):

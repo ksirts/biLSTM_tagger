@@ -21,9 +21,11 @@ class Model(object):
         if model_type == 'char':
             self._create_char_only_model(params)
         elif model_type.startswith('rnd'):
-            self._create_rand_embedding_model(params)
+            self._create_trainable_embedding_model(params)
         elif model_type.startswith('fix'):
             self._create_fixed_embedding_model(params)
+        elif model_type.startswith('tune'):
+            self._create_trainable_embedding_model(params)
 
 
     def _create_char_only_model(self, params):
@@ -42,13 +44,13 @@ class Model(object):
         self.model = CharacterEncoder(self.logger, hidden_dim=hidden_dim, tagset_size=output_dim,
                                      embedding_dim=embedding_dim)
 
-    def _create_rand_embedding_model(self, params):
+    def _create_trainable_embedding_model(self, params):
         ## Creating models
         # Char only model
-        self.logger.info('# Creating a model with random embeddings ...')
+        self.logger.info('# Creating a model with trainable embeddings ...')
         char_output = 0
 
-        if self.model_type == 'rnd+char':
+        if self.model_type in ('rnd+char', 'tune+char'):
             self.logger.info('# Creating char model ...')
             char_emb = params['char_emb']
             char_hidden = params['char_hidden']
@@ -142,10 +144,10 @@ class Model(object):
         if self.model_type == 'char':
             predictions = self._get_char_model_predictions(batch, train)
 
-        elif self.model_type in ('rnd', 'fix'):
+        elif self.model_type in ('rnd', 'fix', 'tune'):
             predictions = self._get_word_model_predictions(batch, train)
 
-        elif self.model_type in ('rnd+char', 'fix+char'):
+        elif self.model_type in ('rnd+char', 'fix+char', 'tune+char'):
             predictions = self._get_word_and_char_model_predictions(batch, train)
         # words, lengths = batch.word
         # char_embeddings = None
