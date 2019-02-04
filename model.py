@@ -29,8 +29,6 @@ class Model(object):
             self._create_fixed_embedding_model(params)
         elif model_type.startswith('tune'):
             self._create_trainable_embedding_model(params)
-        elif model_type.startswith('tune'):
-            self._create_fixed_embedding_model(params)
 
 
     def _create_char_only_model(self, params):

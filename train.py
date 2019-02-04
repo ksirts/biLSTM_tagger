@@ -32,7 +32,7 @@ def parse_arguments():
     parser.add_argument('--chars', action='store_true', help='Use character level model for embeddings')
     parser.add_argument('--words', default=None, choices=['random', 'fixed', 'tuned'], help='How to use word embeddings')
     parser.add_argument('--oov-embeddings', action='store_true', help='Load pretrained embeddings for all words')
-    parser.add_argument('--input-projection', action='store_true', help='Use input projection in the word model')
+    parser.add_argument('--transform', action='store_true', help='Use input transformation in the word model')
     parser.add_argument('--lang', default='en', help='Language of the dataset')
     parser.add_argument('--model-name', required=True, help='Name for the model')
     parser.add_argument('--log-level', default='info', choices=['info', 'debug'], help='Logging level')
@@ -45,6 +45,7 @@ def parse_arguments():
     parser.add_argument('--index', type=int, help='If given then indexes the runs of the same model')
     parser.add_argument('--task', default='pos', choices=['pos', 'posmorph'])
     parser.add_argument('--train-unk', action='store_true', help='Train unk vector')
+    parser.add_argument('--decode', action='store_true', help='Decode only')
     args = parser.parse_args()
 
     return args
@@ -63,6 +64,9 @@ class Trainer(object):
         self.params = {}
         self.params['batch_size'] = args.batch_size
         self.params['hidden_dim'] = args.hidden_dim
+        self.params['char_emb'] = args.char_emb
+        self.params['char_hidden'] = args.char_hidden
+        self.params['word_emb'] = args.word_emb
 
         self.train_iterator = None
         self.dev_iterator = None
@@ -106,31 +110,18 @@ class Trainer(object):
         CHAR.build_vocab(train_data)
 
         self.word_field = WORD
+        self.num_initial_words = len(WORD.vocab)  # for computing OOV accuracy
+        self.logger.info('# Initial word vocab size: {}'.format(self.num_initial_words))
+
         if pretrained:
             self.logger.info("# Loading word vectors from file")
             vectors = vocab.FastText(language=lang)
-            # new_stoi = Counter()
-            # new_itos = list()
-            # out_words = []
-            # for s, i in WORD.vocab.stoi.items():
-            #     if s in vectors.stoi:
-            #         new_stoi[s] = len(new_stoi)
-            #         new_itos.append(s)
-            #     else:
-            #         out_words.append(s)
-            # self.trained_vectors = len(new_stoi)
-            # for s in out_words:
-            #     new_stoi[s] = len(new_stoi)
-            #     new_itos.append(s)
-            # self.word_field.vocab.itos = new_itos
-             #self.word_field.vocab.stoi = new_stoi
-            WORD.vocab.load_vectors(vectors)
 
-            # self.logger.info('# Number of trained embeddings: {}'.format(self.trained_vectors))
             if oov_embeddings:
                 self.logger.info("# Copying all pretrained word embeddings into vocabulary")
                 WORD.vocab.extend(vectors)
-                WORD.vocab.load_vectors(vectors)
+
+            WORD.vocab.load_vectors(vectors)
 
         self.logger.info('# Word vocab size: {}'.format(len(WORD.vocab)))
         self.logger.info('# Tag vocab size: {}'.format(len(LABEL.vocab)))
@@ -149,8 +140,7 @@ class Trainer(object):
         self.dev_iterator = dev_iterator
         self.test_iterator = test_iterator
 
-    def create_model(self, args):
-        self._set_params(args)
+    def create_model(self, args, device):
         model_type = self.model_type
         logger = self.logger
         params = self.params
@@ -163,17 +153,21 @@ class Trainer(object):
             pretrained_embeddings = self.word_field.vocab.vectors
             self.model.copy_embeddings(pretrained_embeddings)
 
-    def create_optimizer(self, device):
+        self.logger.info('# Copying o to device ...')
+        self.model.to_device(device)
+
+    def create_loss(self, device):
         self.logger.info('# Creating loss function ...')
         loss_function = nn.CrossEntropyLoss(ignore_index=self.word_field.vocab.stoi['<pad>'])
+        self.logger.info('# Copying loss to device ...')
+        self.loss_function = loss_function.to(device)
 
+
+    def create_optimizer(self, device):
         self.logger.info('# Creating the parameter optimizer ...')
         model_params = self.model.params
         self.optimizer = optim.Adam(model_params)
 
-        self.logger.info('# Copying objects to device ...')
-        self.model.to_device(device)
-        self.loss_function = loss_function.to(device)
 
     def load_model(self, fn):
         #TODO: Check the existence of the file path
@@ -194,7 +188,7 @@ class Trainer(object):
                 return 'rnd'
 
         # Model with pretrained fixed embeddings
-        if args.words == 'fixed' and args.oov_embeddings is False:
+        if args.words == 'fixed' and args.oov_embeddings is False and args.transform is False:
             if args.chars:
                 return 'fix+char'
             else:
@@ -208,20 +202,27 @@ class Trainer(object):
                 return 'tune'
 
         # Model with pretrained fixed embedings that are also used during testing
-        if args.words == 'fixed' and args.oov_embeddings is True:
+        if args.words == 'fixed' and args.oov_embeddings is True and args.transform is False:
             if args.chars:
                 return 'fix-oov+char'
             else:
                 return 'fix-oov'
 
-    def _set_params(self, args):
-        if 'char' in self.model_type:
-            self.params['char_emb'] = args.char_emb
-            self.params['char_hidden'] = args.char_hidden
-        if self.model_type != 'char':
-            self.params['word_emb'] = args.word_emb
+        # Model with pretrained fixed embeddings and input transformation matrix
+        if args.words == 'fixed' and args.oov_embeddings is False and args.transform is True:
+            if args.chars:
+                return 'fix-trans+char'
+            else:
+                return 'fix-trans'
 
-    def train(self, max_epoch=400, es_limit=40):
+        # Model with pretrained fixed embeddings that are also used during testing and input transformation matrix
+        if args.words == 'fixed' and args.oov_embeddings is True and args.transform is True:
+            if args.chars:
+                return 'fix-oov-trans+char'
+            else:
+                return 'fix-oov-trans'
+
+    def train(self, es_limit=40):
         ''' Train the model
         :param max_epoch: maximum number of epochs
         :param es_limit: early stopping limit - stop training if the model has not improved
@@ -233,7 +234,7 @@ class Trainer(object):
         best_oov_acc = 0
 
         self.logger.info('# Start training ...')
-        for epoch in range(max_epoch):
+        for epoch in range(400):
             if epoch - best_epoch > es_limit:
                 self.logger.info('# Finished training after {:d} epochs\n'.format(epoch-1))
                 break
@@ -254,7 +255,6 @@ class Trainer(object):
         self.logger.info(f'Best epoch: {best_epoch+1:02}, Best Acc: {best_acc*100:.3f}%, Best OOV Acc: {best_oov_acc*100:.3f}%')
 
     def _train_epoch(self):
-    # def train(model, iterator, optimizer, criterion, char_model=None, oov_embeds=False):
 
         epoch_loss = 0
         epoch_acc = 0
@@ -285,7 +285,6 @@ class Trainer(object):
 
             if i % 10 == 0:
                 self.logger.debug(f'| Batch: {i:02} | Batch Loss: {loss:.3f} | Batch Acc: {acc*100:.2f}%')
-                # print('UNK vector:', self.model.unk_vector)
 
         return epoch_loss / len(self.train_iterator), epoch_acc / len(self.train_iterator)
 
@@ -308,7 +307,6 @@ class Trainer(object):
         return acc
 
     def evaluate(self, test=False):
-            #model, iterator, criterion, char_model=None, oov_embeds=False):
 
         epoch_loss = 0.0
         epoch_acc = 0.0
@@ -345,7 +343,8 @@ class Trainer(object):
         _, predictions = torch.max(predictions, 1)
         unk_index = self.word_field.vocab.stoi['<unk>']
         data = [[pred, lab] for (word, pred, lab) in zip(words, predictions, labels)
-                if word == unk_index]
+                if (word == unk_index or word >= self.num_initial_words)]
+        self.logger.debug('# Number of OOV words: {:d}'.format(len(data)))
         if len(data) == 0:
             return 0
         data = np.array(data)
@@ -372,7 +371,7 @@ def main():
 
     pretrained = args.words in ('fixed', 'tuned')
     trainer.load_data(args.lang, args.task, pretrained=pretrained, oov_embeddings=args.oov_embeddings)
-    trainer.create_model(args)
+    trainer.create_model(args, device)
 
     # Load previous model from file
     if args.load is not None:
@@ -381,53 +380,19 @@ def main():
     else:
         logger.info('# Creating new parameters ...')
 
-    trainer.create_optimizer(device=device)
+    trainer.create_loss(device=device)
 
-    trainer.train()
+    # Only evaluate the model
+    if args.decode:
+        valid_loss, valid_acc, valid_oov_acc = trainer.evaluate()
+        fmt = '| Valid Loss: {:.3f} | Valid Acc: {:.3%} | Valid OOV Acc: {:.3%}'
+        logger.info(fmt.format(valid_loss, valid_acc, valid_oov_acc))
+    else:
+        trainer.create_optimizer(device=device)
+        trainer.train()
 
     if args.test:
         trainer.test()
-
-
-
-
-
-
-
-
-
-    # Char and word model
-    # elif args.chars:
-    #     print('# Creating char model ...', file=sys.stderr)
-    #     char_model = CharEmbeddings(CHAR_EMBEDDING_DIM, CHAR_HIDDEN_DIM, len(CHAR.vocab))
-
-    #     print('# Creating encoder ...', file=sys.stderr)
-    #     vocab_len = len(WORD.vocab)
-    #     if args.oov_embeddings:
-    #         vocab_len = 0
-    #     model = LSTMTagger(HIDDEN_DIM, len(UD_TAG.vocab), EMBEDDING_DIM, word_embedding_dim=WORD_EMBEDDING_DIM,
-    #                        vocab_size=vocab_len, freeze=args.freeze, input_projection=args.input_projection)
-
-    # Word model only
-    # else:
-    #     char_model = None
-    #     print('# Creating encoder ...', file=sys.stderr)
-    #     vocab_len = len(WORD.vocab)
-    #     if args.oov_embeddings:
-    #         vocab_len = 0
-    #     model = LSTMTagger(HIDDEN_DIM, len(UD_TAG.vocab), WORD_EMBEDDING_DIM, word_embedding_dim=WORD_EMBEDDING_DIM,
-    #                        vocab_size=vocab_len, freeze=args.freeze, input_projection=args.input_projection)
-
-
-
-
-    # Copy the word embeddings to the model
-    # if args.pretrained and not args.oov_embeddings:
-    #     print('# Copying pretrained embeddings ...', file=sys.stderr)
-    #     pretrained_embeddings = WORD.vocab.vectors
-    #     model.word_embeddings.weight.data.copy_(pretrained_embeddings)
-
-
 
 
 if __name__ == '__main__':
