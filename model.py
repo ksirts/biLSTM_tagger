@@ -5,6 +5,7 @@ from char_embeddings import CharEmbeddings
 from lstm_encoder import CharacterEncoder
 from lstm_encoder import WordEncoder
 from lstm_encoder import FixedWordEncoder
+from lstm_encoder import TransformWordEncoder
 
 import utils
 
@@ -29,6 +30,8 @@ class Model(object):
             self._create_fixed_embedding_model(params)
         elif model_type.startswith('tune'):
             self._create_trainable_embedding_model(params)
+        elif model_type.startswith('trans'):
+            self._create_fixed_embedding_model_with_transformation(params)
 
 
     def _create_char_only_model(self, params):
@@ -94,6 +97,29 @@ class Model(object):
                                  embedding_dim=embedding_dim,
                                  hidden_dim=hidden_dim, tagset_size=output_dim)
 
+    def _create_fixed_embedding_model_with_transformation(self, params):
+        self.logger.info('# Creating a model with fixed pretrained embeddings and a transformation layer ...')
+        char_output = 0
+
+        if 'char' in self.model_type:
+            self.logger.info('# Creating char model ...')
+            char_emb = params['char_emb']
+            char_hidden = params['char_hidden']
+            char_vocab = params['num_chars']
+            self.char_encoder = CharEmbeddings(self.logger, embedding_dim=char_emb, hidden_dim=char_hidden,
+                                               vocab_size=char_vocab)
+            char_output = 4 * char_hidden
+
+        self.logger.info('# Creating encoder with fixed embeddings and a transformation layer ...')
+        word_emb = params['word_emb']
+        embedding_dim = word_emb + char_output
+        hidden_dim = params['hidden_dim']
+        output_dim = params['num_tags']
+        self.model = TransformWordEncoder(self.logger, word_embedding_dim=word_emb,
+                                      embedding_dim=embedding_dim,
+                                      hidden_dim=hidden_dim, tagset_size=output_dim)
+
+
     def load(self, fn):
         # TODO: check the existence of the file path
         if self.char_encoder is not None:
@@ -148,13 +174,13 @@ class Model(object):
         elif self.model_type in ('rnd', 'tune'):
             predictions = self._get_word_model_predictions(batch, train)
 
-        elif self.model_type in ('fix', 'fix-oov'):
+        elif self.model_type in ('fix', 'fix-oov', 'trans', 'trans-oov'):
             predictions = self._get_fixed_word_model_predictions(batch, train)
 
         elif self.model_type in ('rnd+char', 'tune+char'):
             predictions = self._get_word_and_char_model_predictions(batch, train)
 
-        elif self.model_type in ('fix+char', 'fix-oov+char'):
+        elif self.model_type in ('fix+char', 'fix-oov+char', 'trans+char', 'trans-oov+char'):
             predictions = self._get_fixed_word_and_char_model_predictions(batch, train)
         # words, lengths = batch.word
         # char_embeddings = None

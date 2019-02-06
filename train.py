@@ -211,16 +211,16 @@ class Trainer(object):
         # Model with pretrained fixed embeddings and input transformation matrix
         if args.words == 'fixed' and args.oov_embeddings is False and args.transform is True:
             if args.chars:
-                return 'fix-trans+char'
+                return 'trans+char'
             else:
-                return 'fix-trans'
+                return 'trans'
 
         # Model with pretrained fixed embeddings that are also used during testing and input transformation matrix
         if args.words == 'fixed' and args.oov_embeddings is True and args.transform is True:
             if args.chars:
-                return 'fix-oov-trans+char'
+                return 'trans-oov+char'
             else:
-                return 'fix-oov-trans'
+                return 'trans-oov'
 
     def train(self, es_limit=40):
         ''' Train the model

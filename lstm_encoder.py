@@ -129,6 +129,50 @@ class FixedWordEncoder(nn.Module):
         return tag_space
 
 
+class TransformWordEncoder(nn.Module):
+    ''' The model with word embeddings and optional character embeddings.
+       If character embeddings are used then they constructed by CharEmbeddings object and passed
+       to the forward method.
+    '''
+
+    def __init__(self, logger, word_embedding_dim, embedding_dim, hidden_dim, tagset_size):
+        super(TransformWordEncoder, self).__init__()
+        self.logger = logger
+        self.logger.info('# Creating TransformWordEncoder')
+
+        self.hidden_dim = hidden_dim
+
+        self.embed2input = nn.Linear(word_embedding_dim, word_embedding_dim)
+
+        # The LSTM takes word embeddings as inputs, and outputs hidden states
+        # with dimensionality hidden_dim.
+        self.lstm = nn.LSTM(embedding_dim, hidden_dim, batch_first=True, bidirectional=True)
+        self.dropout = nn.Dropout(p=0.5)
+
+        # The linear layer that maps from hidden state space to tag space
+        linear_in = 2 * hidden_dim
+        self.hidden2tag = nn.Linear(linear_in, tagset_size)
+
+    def forward(self, word_embeddings, lengths, char_embeddings=None):
+        word_embeds = self.embed2input(word_embeddings)
+        word_embeds = self.dropout(word_embeds)
+
+        if char_embeddings is not None:
+            char_embeds = self.dropout(char_embeddings)
+            embeds = torch.cat([word_embeds, char_embeds], dim=2)
+        else:
+            embeds = word_embeds
+
+        lengths = lengths.reshape(-1)
+        embeds_pack = pack_padded_sequence(embeds, lengths, batch_first=True)
+        pack_lstm_out, _ = self.lstm(embeds_pack)
+        lstm_out, _ = pad_packed_sequence(pack_lstm_out, batch_first=True)
+        lstm_out = self.dropout(lstm_out)
+
+        tag_space = self.hidden2tag(lstm_out)
+        return tag_space
+
+
 class LSTMTagger(nn.Module):
 
     def __init__(self, hidden_dim, tagset_size, embedding_dim, word_embedding_dim=0, vocab_size=0,
