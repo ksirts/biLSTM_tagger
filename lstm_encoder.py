@@ -155,6 +155,7 @@ class TransformWordEncoder(nn.Module):
 
     def forward(self, word_embeddings, lengths, char_embeddings=None):
         word_embeds = self.embed2input(word_embeddings)
+        word_embeds = nn.ELU(word_embeds)
         word_embeds = self.dropout(word_embeds)
 
         if char_embeddings is not None:

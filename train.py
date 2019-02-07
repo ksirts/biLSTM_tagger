@@ -105,7 +105,7 @@ class Trainer(object):
                                                              logger=self.logger)
 
         # Create vocabularies
-        WORD.build_vocab(train_data)
+        WORD.build_vocab(train_data, min_freq=1)
         LABEL.build_vocab(train_data)
         CHAR.build_vocab(train_data)
 
